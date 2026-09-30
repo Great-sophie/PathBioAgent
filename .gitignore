@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large / private data
+data/raw/
+data/private/
+*.svs
+*.tif
+*.tiff
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Outputs
+outputs/*
+!outputs/.gitkeep
+
+# OS
+.DS_Store
