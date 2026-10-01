@@ -3,7 +3,9 @@ from typing import Literal
 from langgraph.graph import StateGraph, START, END
 
 from pathbioagent.state import BiomarkerAgentState
+
 from pathbioagent.nodes import (
+    interpret_query_node,
     parse_query,
     search_candidates,
     select_candidate,
@@ -15,17 +17,34 @@ from pathbioagent.nodes import (
 
 def route_after_evidence_gate(
     state: BiomarkerAgentState,
-) -> Literal["select_candidate", "build_report"]:
+) -> Literal[
+    "select_candidate",
+    "build_report",
+]:
     """
-    Decide whether the agent should test another candidate
-    or finish and build the final report.
+    Decide whether another candidate should be tested
+    or the final report should be generated.
     """
 
-    tested = state.get("tested_candidates", [])
-    candidates = state.get("candidate_queue", [])
+    tested = state.get(
+        "tested_candidates",
+        [],
+    )
 
-    iteration = state.get("iteration", 0)
-    max_iterations = state.get("max_iterations", 10)
+    candidates = state.get(
+        "candidate_queue",
+        [],
+    )
+
+    iteration = state.get(
+        "iteration",
+        0,
+    )
+
+    max_iterations = state.get(
+        "max_iterations",
+        10,
+    )
 
     # Safety stop
     if iteration >= max_iterations:
@@ -35,20 +54,37 @@ def route_after_evidence_gate(
     if len(tested) < len(candidates):
         return "select_candidate"
 
-    # All candidates tested
     return "build_report"
 
 
 def build_graph():
     """
-    Build and compile the PathBioAgent LangGraph.
+    Build and compile PathBioAgent.
+
+    Workflow:
+
+        user query
+            ↓
+        structured query interpretation
+            ↓
+        deterministic candidate search
+            ↓
+        deterministic evidence collection
+            ↓
+        deterministic evidence gate
+            ↓
+        final evidence report
     """
 
-    builder = StateGraph(BiomarkerAgentState)
+    builder = StateGraph(
+        BiomarkerAgentState
+    )
 
-    # --------------------------------------------------
     # Nodes
-    # --------------------------------------------------
+    builder.add_node(
+        "interpret_query",
+        interpret_query_node,
+    )
 
     builder.add_node(
         "parse_query",
@@ -80,12 +116,14 @@ def build_graph():
         build_report,
     )
 
-    # --------------------------------------------------
-    # Graph edges
-    # --------------------------------------------------
-
+    # Main path
     builder.add_edge(
         START,
+        "interpret_query",
+    )
+
+    builder.add_edge(
+        "interpret_query",
         "parse_query",
     )
 
@@ -109,16 +147,16 @@ def build_graph():
         "evidence_gate",
     )
 
-    # --------------------------------------------------
-    # Conditional loop
-    # --------------------------------------------------
-
+    # Candidate loop
     builder.add_conditional_edges(
         "evidence_gate",
         route_after_evidence_gate,
         {
-            "select_candidate": "select_candidate",
-            "build_report": "build_report",
+            "select_candidate":
+                "select_candidate",
+
+            "build_report":
+                "build_report",
         },
     )
 
@@ -127,10 +165,4 @@ def build_graph():
         END,
     )
 
-    # --------------------------------------------------
-    # Compile
-    # --------------------------------------------------
-
-    graph = builder.compile()
-
-    return graph
+    return builder.compile()

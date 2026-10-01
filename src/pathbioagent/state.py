@@ -4,10 +4,14 @@ from typing import Any, Dict, List, Optional, TypedDict
 class BiomarkerAgentState(TypedDict, total=False):
     """Shared LangGraph state for PathBioAgent."""
 
-    # User query
+    # User input
     query: str
 
-    # Parsed task type
+    # Structured query interpretation produced by
+    # the LLM interpreter or deterministic fallback.
+    structured_query: Dict[str, Any]
+
+    # Workflow task type
     task_type: str
 
     # Candidate management
@@ -15,10 +19,10 @@ class BiomarkerAgentState(TypedDict, total=False):
     current_candidate: Optional[str]
     tested_candidates: List[str]
 
-    # Scientific evidence collected by tools
+    # Scientific evidence
     evidence: Dict[str, Any]
 
-    # Agent decision
+    # Current deterministic decision
     current_decision: Optional[str]
 
     # Workflow control

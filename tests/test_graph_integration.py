@@ -5,45 +5,128 @@ import pathbioagent.graph as graph_module
 # Synthetic LangGraph nodes
 # ============================================================
 
-def fake_parse_query(state):
-    trace = list(state.get("trace", []))
+def fake_interpret_query_node(state):
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
 
-    trace.append("parse_query")
+    trace.append(
+        "interpret_query"
+    )
 
     return {
-        "query": state["query"],
-        "task_type": "synthetic_test",
-        "candidate_queue": [],
-        "current_candidate": None,
-        "tested_candidates": [],
-        "evidence": {},
-        "current_decision": None,
-        "iteration": 0,
-        "max_iterations": state.get(
-            "max_iterations",
-            10,
-        ),
-        "trace": trace,
-        "final_report": None,
+        "structured_query": {
+            "intent":
+                "preference",
+
+            "target_scale":
+                "10x",
+
+            "entity":
+                "molecular_program",
+
+            "confidence":
+                1.0,
+
+            "parser_source":
+                "deterministic_fallback",
+
+            "model_name":
+                None,
+
+            "explicit_scale_guard_applied":
+                False,
+        },
+
+        "trace":
+            trace,
+    }
+
+
+def fake_parse_query(state):
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
+
+    trace.append(
+        "parse_query"
+    )
+
+    return {
+        "query":
+            state["query"],
+
+        "task_type":
+            "synthetic_test",
+
+        "candidate_queue":
+            [],
+
+        "current_candidate":
+            None,
+
+        "tested_candidates":
+            [],
+
+        "evidence":
+            {},
+
+        "current_decision":
+            None,
+
+        "iteration":
+            0,
+
+        "max_iterations":
+            state.get(
+                "max_iterations",
+                10,
+            ),
+
+        "trace":
+            trace,
+
+        "final_report":
+            None,
     }
 
 
 def fake_search_candidates(state):
-    trace = list(state.get("trace", []))
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
 
-    trace.append("search_candidates")
+    trace.append(
+        "search_candidates"
+    )
 
     return {
         "candidate_queue": [
             "Program_A",
             "Program_B",
         ],
-        "trace": trace,
+
+        "trace":
+            trace,
     }
 
 
 def fake_select_candidate(state):
-    trace = list(state.get("trace", []))
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
 
     tested = state.get(
         "tested_candidates",
@@ -69,13 +152,21 @@ def fake_select_candidate(state):
     )
 
     return {
-        "current_candidate": candidate,
-        "trace": trace,
+        "current_candidate":
+            candidate,
+
+        "trace":
+            trace,
     }
 
 
 def fake_test_candidate(state):
-    trace = list(state.get("trace", []))
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
 
     candidate = state[
         "current_candidate"
@@ -88,9 +179,14 @@ def fake_test_candidate(state):
         )
     )
 
-    evidence[candidate] = {
-        "program": candidate,
-        "synthetic_score": 1.0,
+    evidence[
+        candidate
+    ] = {
+        "program":
+            candidate,
+
+        "synthetic_score":
+            1.0,
     }
 
     tested = list(
@@ -100,7 +196,9 @@ def fake_test_candidate(state):
         )
     )
 
-    tested.append(candidate)
+    tested.append(
+        candidate
+    )
 
     iteration = (
         state.get(
@@ -115,15 +213,27 @@ def fake_test_candidate(state):
     )
 
     return {
-        "evidence": evidence,
-        "tested_candidates": tested,
-        "iteration": iteration,
-        "trace": trace,
+        "evidence":
+            evidence,
+
+        "tested_candidates":
+            tested,
+
+        "iteration":
+            iteration,
+
+        "trace":
+            trace,
     }
 
 
 def fake_evidence_gate(state):
-    trace = list(state.get("trace", []))
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
 
     candidate = state[
         "current_candidate"
@@ -137,41 +247,68 @@ def fake_evidence_gate(state):
     )
 
     item = dict(
-        evidence[candidate]
+        evidence[
+            candidate
+        ]
     )
 
-    item["decision"] = {
+    item[
+        "decision"
+    ] = {
         "status":
             "supported_exploratory_hypothesis",
+
         "raw_gate_status":
             "supported_exploratory_hypothesis",
-        "consensus_ok": True,
-        "target_ok": True,
-        "robust_ok": True,
-        "evidence_conflict": False,
+
+        "consensus_ok":
+            True,
+
+        "target_ok":
+            True,
+
+        "robust_ok":
+            True,
+
+        "evidence_conflict":
+            False,
+
         "reasons": [
             "Synthetic integration evidence."
         ],
     }
 
-    evidence[candidate] = item
+    evidence[
+        candidate
+    ] = item
 
     trace.append(
         f"evidence_gate:{candidate}"
     )
 
     return {
-        "evidence": evidence,
+        "evidence":
+            evidence,
+
         "current_decision":
             "supported_exploratory_hypothesis",
-        "trace": trace,
+
+        "trace":
+            trace,
     }
 
 
 def fake_build_report(state):
-    trace = list(state.get("trace", []))
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
 
-    trace.append("build_report")
+    trace.append(
+        "build_report"
+    )
 
     evidence = state.get(
         "evidence",
@@ -179,7 +316,6 @@ def fake_build_report(state):
     )
 
     supported = []
-
     evidence_cards = []
 
     for program, item in evidence.items():
@@ -199,142 +335,94 @@ def fake_build_report(state):
             ==
             "supported_exploratory_hypothesis"
         ):
-            supported.append(program)
+
+            supported.append(
+                program
+            )
 
         evidence_cards.append(
             {
-                "program": program,
-                "status": status,
-                "evidence_flags": {},
-                "reasons": decision.get(
-                    "reasons",
-                    [],
-                ),
+                "program":
+                    program,
+
+                "status":
+                    status,
+
+                "evidence_flags":
+                    {},
+
+                "reasons":
+                    decision.get(
+                        "reasons",
+                        [],
+                    ),
             }
         )
 
     report = {
-        "query": state.get(
-            "query"
-        ),
-        "candidates_tested": len(
+        "query":
             state.get(
-                "tested_candidates",
-                [],
-            )
-        ),
-        "total_candidates": len(
+                "query"
+            ),
+
+        "structured_query":
             state.get(
-                "candidate_queue",
-                [],
-            )
-        ),
-        "supported": supported,
+                "structured_query"
+            ),
+
+        "candidates_tested":
+            len(
+                state.get(
+                    "tested_candidates",
+                    [],
+                )
+            ),
+
+        "total_candidates":
+            len(
+                state.get(
+                    "candidate_queue",
+                    [],
+                )
+            ),
+
+        "supported":
+            supported,
+
         "evidence_cards":
             evidence_cards,
     }
 
     return {
-        "final_report": report,
-        "trace": trace,
+        "final_report":
+            report,
+
+        "trace":
+            trace,
     }
 
 
 # ============================================================
-# Routing tests
+# Monkeypatch helper
 # ============================================================
 
-def test_route_continues_when_candidates_remain():
-    state = {
-        "tested_candidates": [
-            "Program_A",
-        ],
-        "candidate_queue": [
-            "Program_A",
-            "Program_B",
-        ],
-        "iteration": 1,
-        "max_iterations": 10,
-    }
-
-    route = (
-        graph_module
-        .route_after_evidence_gate(
-            state
-        )
-    )
-
-    assert route == "select_candidate"
-
-
-def test_route_builds_report_when_all_candidates_tested():
-    state = {
-        "tested_candidates": [
-            "Program_A",
-            "Program_B",
-        ],
-        "candidate_queue": [
-            "Program_A",
-            "Program_B",
-        ],
-        "iteration": 2,
-        "max_iterations": 10,
-    }
-
-    route = (
-        graph_module
-        .route_after_evidence_gate(
-            state
-        )
-    )
-
-    assert route == "build_report"
-
-
-def test_route_respects_iteration_safety_stop():
-    state = {
-        "tested_candidates": [
-            "Program_A",
-        ],
-        "candidate_queue": [
-            "Program_A",
-            "Program_B",
-            "Program_C",
-        ],
-        "iteration": 1,
-        "max_iterations": 1,
-    }
-
-    route = (
-        graph_module
-        .route_after_evidence_gate(
-            state
-        )
-    )
-
-    assert route == "build_report"
-
-
-# ============================================================
-# Full LangGraph integration
-# ============================================================
-
-def test_full_graph_runs_query_to_final_report(
+def patch_graph_nodes(
     monkeypatch,
 ):
     """
-    Test the full LangGraph topology using synthetic
-    deterministic nodes.
+    Patch every graph node before build_graph() is called.
 
-    Scientific evidence calculations are covered
-    separately by unit tests. This test verifies
-    graph wiring, looping, state propagation,
-    termination, and final-report creation.
+    This guarantees integration tests never access:
+        - external APIs
+        - real research data
     """
 
-    # Important:
-    # patch graph_module BEFORE build_graph()
-    # so LangGraph compiles the synthetic nodes.
+    monkeypatch.setattr(
+        graph_module,
+        "interpret_query_node",
+        fake_interpret_query_node,
+    )
+
     monkeypatch.setattr(
         graph_module,
         "parse_query",
@@ -371,15 +459,178 @@ def test_full_graph_runs_query_to_final_report(
         fake_build_report,
     )
 
-    graph = graph_module.build_graph()
+
+# ============================================================
+# Routing tests
+# ============================================================
+
+def test_route_continues_when_candidates_remain():
+    state = {
+        "tested_candidates": [
+            "Program_A",
+        ],
+
+        "candidate_queue": [
+            "Program_A",
+            "Program_B",
+        ],
+
+        "iteration":
+            1,
+
+        "max_iterations":
+            10,
+    }
+
+    route = (
+        graph_module
+        .route_after_evidence_gate(
+            state
+        )
+    )
+
+    assert (
+        route
+        ==
+        "select_candidate"
+    )
+
+
+def test_route_builds_report_when_all_candidates_tested():
+    state = {
+        "tested_candidates": [
+            "Program_A",
+            "Program_B",
+        ],
+
+        "candidate_queue": [
+            "Program_A",
+            "Program_B",
+        ],
+
+        "iteration":
+            2,
+
+        "max_iterations":
+            10,
+    }
+
+    route = (
+        graph_module
+        .route_after_evidence_gate(
+            state
+        )
+    )
+
+    assert (
+        route
+        ==
+        "build_report"
+    )
+
+
+def test_route_respects_iteration_safety_stop():
+    state = {
+        "tested_candidates": [
+            "Program_A",
+        ],
+
+        "candidate_queue": [
+            "Program_A",
+            "Program_B",
+            "Program_C",
+        ],
+
+        "iteration":
+            1,
+
+        "max_iterations":
+            1,
+    }
+
+    route = (
+        graph_module
+        .route_after_evidence_gate(
+            state
+        )
+    )
+
+    assert (
+        route
+        ==
+        "build_report"
+    )
+
+
+# ============================================================
+# Full LangGraph integration
+# ============================================================
+
+def test_full_graph_runs_query_to_final_report(
+    monkeypatch,
+):
+    """
+    Verify complete graph wiring:
+
+        START
+          ↓
+        interpret_query
+          ↓
+        parse_query
+          ↓
+        search_candidates
+          ↓
+        candidate loop
+          ↓
+        build_report
+          ↓
+        END
+    """
+
+    patch_graph_nodes(
+        monkeypatch
+    )
+
+    graph = (
+        graph_module
+        .build_graph()
+    )
 
     result = graph.invoke(
         {
             "query":
                 "Which programs prefer 10x?",
-            "max_iterations": 10,
-            "trace": [],
+
+            "max_iterations":
+                10,
+
+            "trace":
+                [],
         }
+    )
+
+    # --------------------------------------------------------
+    # Structured query reached graph state
+    # --------------------------------------------------------
+
+    structured = result[
+        "structured_query"
+    ]
+
+    assert (
+        structured[
+            "intent"
+        ]
+        ==
+        "preference"
+    )
+
+    assert (
+        structured[
+            "target_scale"
+        ]
+        ==
+        "10x"
     )
 
     # --------------------------------------------------------
@@ -387,7 +638,9 @@ def test_full_graph_runs_query_to_final_report(
     # --------------------------------------------------------
 
     assert (
-        result["final_report"]
+        result[
+            "final_report"
+        ]
         is not None
     )
 
@@ -400,7 +653,9 @@ def test_full_graph_runs_query_to_final_report(
     # --------------------------------------------------------
 
     assert (
-        result["tested_candidates"]
+        result[
+            "tested_candidates"
+        ]
         ==
         [
             "Program_A",
@@ -409,21 +664,29 @@ def test_full_graph_runs_query_to_final_report(
     )
 
     assert (
-        report["candidates_tested"]
-        == 2
+        report[
+            "candidates_tested"
+        ]
+        ==
+        2
     )
 
     assert (
-        report["total_candidates"]
-        == 2
+        report[
+            "total_candidates"
+        ]
+        ==
+        2
     )
 
     # --------------------------------------------------------
-    # Both passed synthetic evidence gate
+    # Both pass synthetic evidence gate
     # --------------------------------------------------------
 
     assert (
-        report["supported"]
+        report[
+            "supported"
+        ]
         ==
         [
             "Program_A",
@@ -432,49 +695,72 @@ def test_full_graph_runs_query_to_final_report(
     )
 
     # --------------------------------------------------------
-    # Evidence cards exist
+    # Evidence Cards
     # --------------------------------------------------------
 
     assert (
         len(
-            report["evidence_cards"]
+            report[
+                "evidence_cards"
+            ]
         )
-        == 2
+        ==
+        2
     )
 
     for card in report[
         "evidence_cards"
     ]:
 
-        assert "program" in card
+        assert (
+            "program"
+            in card
+        )
 
-        assert "status" in card
+        assert (
+            "status"
+            in card
+        )
 
         assert (
             "evidence_flags"
             in card
         )
 
-        assert "reasons" in card
+        assert (
+            "reasons"
+            in card
+        )
 
     # --------------------------------------------------------
-    # Graph loop executed exactly twice
+    # Loop count
     # --------------------------------------------------------
 
     assert (
-        result["iteration"]
-        == 2
+        result[
+            "iteration"
+        ]
+        ==
+        2
     )
 
     # --------------------------------------------------------
-    # Trace proves topology was traversed
+    # Trace proves full topology
     # --------------------------------------------------------
 
     trace = result[
         "trace"
     ]
 
-    assert "parse_query" in trace
+    assert (
+        "interpret_query"
+        in trace
+    )
+
+    assert (
+        "parse_query"
+        in trace
+    )
 
     assert (
         "search_candidates"
@@ -511,15 +797,15 @@ def test_full_graph_runs_query_to_final_report(
         in trace
     )
 
-    assert "build_report" in trace
-
-    # --------------------------------------------------------
-    # Build report must be the final trace event
-    # --------------------------------------------------------
+    assert (
+        "build_report"
+        in trace
+    )
 
     assert (
         trace[-1]
-        == "build_report"
+        ==
+        "build_report"
     )
 
 
@@ -530,60 +816,40 @@ def test_graph_stops_at_max_iterations(
     Verify the graph cannot loop indefinitely.
     """
 
-    monkeypatch.setattr(
-        graph_module,
-        "parse_query",
-        fake_parse_query,
+    patch_graph_nodes(
+        monkeypatch
     )
 
-    monkeypatch.setattr(
-        graph_module,
-        "search_candidates",
-        fake_search_candidates,
+    graph = (
+        graph_module
+        .build_graph()
     )
-
-    monkeypatch.setattr(
-        graph_module,
-        "select_candidate",
-        fake_select_candidate,
-    )
-
-    monkeypatch.setattr(
-        graph_module,
-        "test_candidate",
-        fake_test_candidate,
-    )
-
-    monkeypatch.setattr(
-        graph_module,
-        "evidence_gate",
-        fake_evidence_gate,
-    )
-
-    monkeypatch.setattr(
-        graph_module,
-        "build_report",
-        fake_build_report,
-    )
-
-    graph = graph_module.build_graph()
 
     result = graph.invoke(
         {
             "query":
                 "Which programs prefer 10x?",
-            "max_iterations": 1,
-            "trace": [],
+
+            "max_iterations":
+                1,
+
+            "trace":
+                [],
         }
     )
 
     assert (
-        result["iteration"]
-        == 1
+        result[
+            "iteration"
+        ]
+        ==
+        1
     )
 
     assert (
-        result["tested_candidates"]
+        result[
+            "tested_candidates"
+        ]
         ==
         [
             "Program_A",
@@ -591,7 +857,9 @@ def test_graph_stops_at_max_iterations(
     )
 
     assert (
-        result["final_report"]
+        result[
+            "final_report"
+        ]
         is not None
     )
 
@@ -601,5 +869,6 @@ def test_graph_stops_at_max_iterations(
         ][
             "candidates_tested"
         ]
-        == 1
+        ==
+        1
     )

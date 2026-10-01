@@ -1,7 +1,7 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from pathbioagent.graph import build_graph
 
@@ -14,7 +14,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "PathBioAgent: evidence-driven LangGraph agent "
-            "for multiscale morphology-molecular hypothesis analysis."
+            "for multiscale morphology-molecular hypothesis "
+            "analysis."
         )
     )
 
@@ -24,7 +25,8 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Scientific question, e.g. "
-            "'Which programs prefer 40x?'"
+            "'Which programs have the most robust "
+            "10x preference?'"
         ),
     )
 
@@ -41,13 +43,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--show-trace",
         action="store_true",
-        help="Print the full LangGraph execution trace.",
+        help=(
+            "Print the complete LangGraph execution trace."
+        ),
     )
 
     parser.add_argument(
         "--full-cards",
         action="store_true",
-        help="Print complete Evidence Cards.",
+        help=(
+            "Print complete Evidence Cards as JSON."
+        ),
     )
 
     parser.add_argument(
@@ -78,7 +84,7 @@ def print_header(
 
 def print_program_group(
     title: str,
-    programs: list,
+    programs: List[str],
 ) -> None:
     print()
     print(title)
@@ -87,13 +93,35 @@ def print_program_group(
         print("  None")
         return
 
-    for i, program in enumerate(
+    for index, program in enumerate(
         programs,
         start=1,
     ):
         print(
-            f"  {i}. {program}"
+            f"  {index}. {program}"
         )
+
+
+def format_optional_float(
+    value: Any,
+) -> str:
+    """
+    Format numerical values safely.
+
+    Returns 'None' when value is unavailable.
+    """
+
+    if value is None:
+        return "None"
+
+    try:
+        return f"{float(value):.3f}"
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return str(value)
 
 
 # ============================================================
@@ -103,7 +131,6 @@ def print_program_group(
 def print_compact_card(
     card: Dict[str, Any],
 ) -> None:
-
     program = card.get(
         "program",
         "unknown",
@@ -115,21 +142,21 @@ def print_compact_card(
     )
 
     vote_scale = card.get(
-        "vote_preferred_scale",
+        "vote_preferred_scale"
     )
 
     median_scale = card.get(
-        "cross_model_median_optimum_scale",
+        "cross_model_median_optimum_scale"
     )
 
     agreement = card.get(
-        "max_models_agree",
+        "max_models_agree"
     )
 
     votes = card.get(
         "scale_votes",
         {},
-    )
+    ) or {}
 
     conflict = card.get(
         "evidence_conflict",
@@ -137,17 +164,22 @@ def print_compact_card(
     )
 
     stability = card.get(
-        "median_optimum_stability_fraction",
+        "median_optimum_stability_fraction"
     )
 
     lomo = card.get(
-        "lomo_compatibility_fraction",
+        "lomo_compatibility_fraction"
     )
 
     flags = card.get(
         "evidence_flags",
         {},
-    )
+    ) or {}
+
+    reasons = card.get(
+        "reasons",
+        [],
+    ) or []
 
     print()
     print("-" * 78)
@@ -171,14 +203,12 @@ def print_compact_card(
     )
 
     if agreement is not None:
-
         print(
             "Model agreement: "
             f"{agreement}/8"
         )
 
     if votes:
-
         print(
             "Scale votes: "
             f"2.5x={votes.get('2p5x')}, "
@@ -192,17 +222,15 @@ def print_compact_card(
     )
 
     if stability is not None:
-
         print(
             "Optimum stability: "
-            f"{stability:.3f}"
+            f"{format_optional_float(stability)}"
         )
 
     if lomo is not None:
-
         print(
             "LOMO compatibility: "
-            f"{lomo:.3f}"
+            f"{format_optional_float(lomo)}"
         )
 
     active_flags = [
@@ -212,7 +240,6 @@ def print_compact_card(
     ]
 
     if active_flags:
-
         print(
             "Evidence flags: "
             + ", ".join(
@@ -221,18 +248,11 @@ def print_compact_card(
         )
 
     else:
-
         print(
             "Evidence flags: none"
         )
 
-    reasons = card.get(
-        "reasons",
-        [],
-    )
-
     if reasons:
-
         print("Reasons:")
 
         for reason in reasons:
@@ -242,14 +262,79 @@ def print_compact_card(
 
 
 # ============================================================
-# Report output
+# Full Evidence Card
+# ============================================================
+
+def print_full_card(
+    card: Dict[str, Any],
+) -> None:
+    print()
+    print("-" * 78)
+
+    print(
+        json.dumps(
+            card,
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
+# ============================================================
+# Report access helpers
+# ============================================================
+
+def get_supported(
+    report: Dict[str, Any],
+) -> List[str]:
+    return report.get(
+        "supported_exploratory_hypotheses",
+        report.get(
+            "supported",
+            [],
+        ),
+    )
+
+
+def get_not_supported(
+    report: Dict[str, Any],
+) -> List[str]:
+    return report.get(
+        "not_supported",
+        [],
+    )
+
+
+def get_insufficient(
+    report: Dict[str, Any],
+) -> List[str]:
+    return report.get(
+        "insufficient_robustness_evidence",
+        report.get(
+            "insufficient",
+            [],
+        ),
+    )
+
+
+def get_not_eligible(
+    report: Dict[str, Any],
+) -> List[str]:
+    return report.get(
+        "not_eligible",
+        [],
+    )
+
+
+# ============================================================
+# Main report printer
 # ============================================================
 
 def print_report(
     report: Dict[str, Any],
+    *,
     full_cards: bool = False,
 ) -> None:
-
     print_header(
         "PATHBIOAGENT REPORT"
     )
@@ -275,10 +360,61 @@ def print_report(
         ),
     )
 
+    parser_source = report.get(
+        "parser_source"
+    )
+
+    if parser_source is not None:
+        print(
+            "Query parser:",
+            parser_source,
+        )
+
+    confidence = report.get(
+        "query_confidence"
+    )
+
+    if confidence is not None:
+        print(
+            "Query confidence:",
+            format_optional_float(
+                confidence
+            ),
+        )
+
+    model_name = report.get(
+        "model_name"
+    )
+
+    if model_name:
+        print(
+            "LLM model:",
+            model_name,
+        )
+
+    # --------------------------------------------------------
+    # Candidate accounting
+    # --------------------------------------------------------
+
+    n_tested = report.get(
+        "candidates_tested",
+        report.get(
+            "n_tested",
+            0,
+        ),
+    )
+
+    n_candidates = report.get(
+        "total_candidates",
+        report.get(
+            "n_candidates",
+            0,
+        ),
+    )
+
     print(
         "Candidates tested:",
-        f"{report.get('n_tested', 0)}"
-        f"/{report.get('n_candidates', 0)}",
+        f"{n_tested}/{n_candidates}",
     )
 
     # ========================================================
@@ -291,38 +427,45 @@ def print_report(
 
     print_program_group(
         "SUPPORTED EXPLORATORY HYPOTHESES",
-        report.get(
-            "supported_exploratory_hypotheses",
-            [],
+        get_supported(
+            report
         ),
     )
 
     print_program_group(
         "NOT SUPPORTED",
-        report.get(
-            "not_supported",
-            [],
+        get_not_supported(
+            report
         ),
     )
 
     print_program_group(
         "INSUFFICIENT ROBUSTNESS EVIDENCE",
-        report.get(
-            "insufficient_robustness_evidence",
-            [],
+        get_insufficient(
+            report
         ),
     )
 
     print_program_group(
         "NOT ELIGIBLE",
-        report.get(
-            "not_eligible",
-            [],
+        get_not_eligible(
+            report
         ),
     )
 
+    unknown = report.get(
+        "unknown_status",
+        [],
+    )
+
+    if unknown:
+        print_program_group(
+            "UNKNOWN STATUS",
+            unknown,
+        )
+
     # ========================================================
-    # Independent evidence diagnostics
+    # Evidence diagnostics
     # ========================================================
 
     print_header(
@@ -333,7 +476,10 @@ def print_report(
         "AGGREGATION CONFLICT",
         report.get(
             "evidence_conflict_programs",
-            [],
+            report.get(
+                "aggregation_conflict",
+                [],
+            ),
         ),
     )
 
@@ -341,7 +487,10 @@ def print_report(
         "TIE CONSENSUS",
         report.get(
             "tie_consensus_programs",
-            [],
+            report.get(
+                "tie_consensus",
+                [],
+            ),
         ),
     )
 
@@ -369,8 +518,30 @@ def print_report(
         ),
     )
 
+    missing_lomo = report.get(
+        "missing_lomo_programs",
+        [],
+    )
+
+    if missing_lomo:
+        print_program_group(
+            "MISSING LOMO",
+            missing_lomo,
+        )
+
+    weak_consensus = report.get(
+        "weak_model_consensus_programs",
+        [],
+    )
+
+    if weak_consensus:
+        print_program_group(
+            "WEAK MODEL CONSENSUS",
+            weak_consensus,
+        )
+
     # ========================================================
-    # Evidence cards
+    # Evidence Cards
     # ========================================================
 
     print_header(
@@ -383,30 +554,19 @@ def print_report(
     )
 
     if not cards:
-
         print(
             "No Evidence Cards available."
         )
 
     else:
-
         for card in cards:
 
             if full_cards:
-
-                print()
-                print("-" * 78)
-
-                print(
-                    json.dumps(
-                        card,
-                        indent=2,
-                        ensure_ascii=False,
-                    )
+                print_full_card(
+                    card
                 )
 
             else:
-
                 print_compact_card(
                     card
                 )
@@ -419,47 +579,95 @@ def print_report(
         "INTERPRETATION SCOPE"
     )
 
-    print(
+    interpretation_scope = (
         report.get(
-            "interpretation_scope",
-            "Not available.",
+            "interpretation_scope"
         )
     )
+
+    if interpretation_scope:
+        print(
+            interpretation_scope
+        )
+
+    else:
+        print(
+            "Results are exploratory and should not be "
+            "interpreted as clinical biomarker validation, "
+            "biological causality, or patient-level "
+            "molecular diagnosis."
+        )
+
+
+# ============================================================
+# Trace
+# ============================================================
+
+def print_trace(
+    trace: List[str],
+) -> None:
+    print_header(
+        "AGENT TRACE"
+    )
+
+    if not trace:
+        print(
+            "No trace available."
+        )
+        return
+
+    for index, event in enumerate(
+        trace,
+        start=1,
+    ):
+        print(
+            f"{index:02d}. {event}"
+        )
 
 
 # ============================================================
 # Save JSON
 # ============================================================
 
-def save_report(
-    report: Dict[str, Any],
+def save_json_report(
     output_path: str,
+    *,
+    report: Dict[str, Any],
+    trace: List[str],
 ) -> None:
-
     path = Path(
         output_path
     )
 
-    path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    if path.parent != Path("."):
+        path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+    payload = {
+        "report":
+            report,
+
+        "trace":
+            trace,
+    }
 
     with path.open(
         "w",
         encoding="utf-8",
-    ) as f:
-
+    ) as handle:
         json.dump(
-            report,
-            f,
+            payload,
+            handle,
             indent=2,
             ensure_ascii=False,
         )
 
     print()
     print(
-        f"Saved report to: {path}"
+        "Saved JSON report:",
+        path,
     )
 
 
@@ -468,13 +676,16 @@ def save_report(
 # ============================================================
 
 def main() -> None:
-
     args = parse_args()
 
-    if args.max_iterations < 1:
-
+    if not args.query.strip():
         raise ValueError(
-            "--max-iterations must be >= 1"
+            "--query cannot be empty."
+        )
+
+    if args.max_iterations < 1:
+        raise ValueError(
+            "--max-iterations must be >= 1."
         )
 
     print_header(
@@ -492,93 +703,80 @@ def main() -> None:
     )
 
     # --------------------------------------------------------
-    # Build LangGraph
+    # Build graph
     # --------------------------------------------------------
 
     graph = build_graph()
 
-    initial_state = {
-        "query":
-            args.query,
-
-        "max_iterations":
-            args.max_iterations,
-
-        "trace":
-            [],
-    }
-
     # --------------------------------------------------------
-    # Run Agent
+    # Invoke Agent
     # --------------------------------------------------------
 
     result = graph.invoke(
-        initial_state
+        {
+            "query":
+                args.query,
+
+            "max_iterations":
+                args.max_iterations,
+
+            "trace":
+                [],
+        }
     )
 
-    final_report = result.get(
+    # --------------------------------------------------------
+    # Extract final report
+    # --------------------------------------------------------
+
+    report = result.get(
         "final_report"
     )
 
-    if final_report is None:
-
+    if report is None:
         raise RuntimeError(
-            "Agent completed without producing "
-            "a final_report."
+            "PathBioAgent finished without "
+            "producing final_report."
         )
+
+    trace = result.get(
+        "trace",
+        [],
+    )
 
     # --------------------------------------------------------
     # Print report
     # --------------------------------------------------------
 
     print_report(
-        final_report,
+        report,
         full_cards=args.full_cards,
     )
 
     # --------------------------------------------------------
-    # Optional trace
+    # Trace
     # --------------------------------------------------------
 
     if args.show_trace:
-
-        print_header(
-            "AGENT TRACE"
+        print_trace(
+            trace
         )
-
-        trace = result.get(
-            "trace",
-            [],
-        )
-
-        if not trace:
-
-            print(
-                "No trace available."
-            )
-
-        else:
-
-            for i, step in enumerate(
-                trace,
-                start=1,
-            ):
-
-                print(
-                    f"{i:02d}. {step}"
-                )
 
     # --------------------------------------------------------
     # Optional JSON output
     # --------------------------------------------------------
 
     if args.save_json:
-
-        save_report(
-            final_report,
+        save_json_report(
             args.save_json,
+            report=report,
+            trace=trace,
         )
 
+
+# ============================================================
+# Entry point
+# ============================================================
 
 if __name__ == "__main__":
     main()

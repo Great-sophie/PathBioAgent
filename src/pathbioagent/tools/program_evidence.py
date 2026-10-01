@@ -1,90 +1,275 @@
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from dotenv import load_dotenv
 
 
 # ============================================================
-# Environment
+# Configuration
 # ============================================================
 
-load_dotenv()
+DEFAULT_RESULTS_ROOT = Path(
+    "/media/sophie/Data2T/Paper3_8model_gene_analysis"
+)
 
+_QUERY_UNSET = object()
 
-ROOT = Path(
-    os.getenv(
-        "PATHBIO_RESULTS_ROOT",
-        "/media/sophie/Data2T/Paper3_8model_gene_analysis",
-    )
+VALID_SCALES = (
+    "2p5x",
+    "10x",
+    "40x",
+)
+
+VALID_INTENTS = (
+    "preference",
+    "visibility",
+    "robustness",
+    "general",
 )
 
 
-FILES = {
-    "consensus":
-        ROOT
-        / "program_visibility"
-        / "program_cross_model_consensus.csv",
+# ============================================================
+# Small utilities
+# ============================================================
 
-    "cross_model":
-        ROOT
-        / "program_visibility"
-        / "program_cross_model_visibility.csv",
+def _results_root() -> Path:
+    """
+    Resolve the root directory containing the real
+    morphology-molecular analysis outputs.
 
-    "preferred_scale":
-        ROOT
-        / "program_visibility"
-        / "program_preferred_scale_by_model.csv",
+    Environment variable takes priority:
 
-    "robustness":
-        ROOT
-        / "final_figures"
-        / "Figure6"
-        / "source_data"
-        / "Figure6_program_robustness_summary.csv",
+        PATHBIO_RESULTS_ROOT
 
-    "lomo":
-        ROOT
-        / "final_figures"
-        / "Figure6"
-        / "source_data"
-        / "Figure6B_leave_one_model_out_vote_consensus.csv",
-}
+    Otherwise the historical local default is used.
+    """
+
+    raw = os.getenv(
+        "PATHBIO_RESULTS_ROOT"
+    )
+
+    if raw:
+        return Path(raw).expanduser()
+
+    return DEFAULT_RESULTS_ROOT
+
+
+def _native(
+    value: Any,
+) -> Any:
+    """
+    Convert pandas / NumPy scalar-like values into
+    JSON-friendly Python values.
+    """
+
+    if value is None:
+        return None
+
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (ValueError, AttributeError):
+            pass
+
+    return value
+
+
+def _row_to_dict(
+    row: pd.Series,
+) -> Dict[str, Any]:
+    """
+    Convert one pandas Series into a clean native dict.
+    """
+
+    return {
+        str(key): _native(value)
+        for key, value in row.to_dict().items()
+    }
+
+
+def _records(
+    frame: pd.DataFrame,
+) -> List[Dict[str, Any]]:
+    """
+    Convert a DataFrame into JSON-friendly records.
+    """
+
+    output: List[Dict[str, Any]] = []
+
+    for _, row in frame.iterrows():
+        output.append(
+            _row_to_dict(row)
+        )
+
+    return output
+
+
+def _normalize_scale(
+    scale: Optional[str],
+) -> Optional[str]:
+    """
+    Normalize a scale string into the internal representation.
+
+    Examples:
+        2.5x -> 2p5x
+        2p5x -> 2p5x
+        10x  -> 10x
+        40x  -> 40x
+    """
+
+    if scale is None:
+        return None
+
+    normalized = (
+        str(scale)
+        .strip()
+        .lower()
+        .replace("×", "x")
+    )
+
+    aliases = {
+        "2.5x": "2p5x",
+        "2.5": "2p5x",
+        "2p5x": "2p5x",
+        "2p5": "2p5x",
+        "10x": "10x",
+        "10": "10x",
+        "40x": "40x",
+        "40": "40x",
+    }
+
+    if normalized in aliases:
+        return aliases[
+            normalized
+        ]
+
+    raise ValueError(
+        "Unsupported target scale: "
+        f"{scale!r}. "
+        f"Expected one of {VALID_SCALES}."
+    )
+
+
+def _validate_intent(
+    intent: str,
+) -> str:
+    """
+    Validate one structured ranking intent.
+    """
+
+    normalized = (
+        str(intent)
+        .strip()
+        .lower()
+    )
+
+    if normalized not in VALID_INTENTS:
+        raise ValueError(
+            "Unsupported ranking intent: "
+            f"{intent!r}. "
+            f"Expected one of {VALID_INTENTS}."
+        )
+
+    return normalized
 
 
 # ============================================================
-# 1. Data loading
+# Load real evidence tables
 # ============================================================
 
 def load_tables() -> Dict[str, pd.DataFrame]:
     """
-    Load all real molecular-program evidence tables.
+    Load the real program-level evidence tables used by
+    PathBioAgent.
+
+    Required files
+    --------------
+    program_visibility/
+        program_visibility_8model_3scale.csv
+        program_cross_model_consensus.csv
+        program_cross_model_visibility.csv
+        program_preferred_scale_by_model.csv
+
+    final_figures/Figure6/source_data/
+        Figure6_program_robustness_summary.csv
+        Figure6B_leave_one_model_out_vote_consensus.csv
     """
 
-    tables: Dict[str, pd.DataFrame] = {}
+    root = _results_root()
 
-    for name, path in FILES.items():
+    paths = {
+        "visibility":
+            root
+            / "program_visibility"
+            / "program_visibility_8model_3scale.csv",
 
-        if not path.exists():
-            raise FileNotFoundError(
-                f"Missing file [{name}]: {path}"
-            )
+        "consensus":
+            root
+            / "program_visibility"
+            / "program_cross_model_consensus.csv",
 
-        tables[name] = pd.read_csv(path)
+        "cross_model":
+            root
+            / "program_visibility"
+            / "program_cross_model_visibility.csv",
 
-    return tables
+        "preferred_scale":
+            root
+            / "program_visibility"
+            / "program_preferred_scale_by_model.csv",
+
+        "robustness":
+            root
+            / "final_figures"
+            / "Figure6"
+            / "source_data"
+            / "Figure6_program_robustness_summary.csv",
+
+        "lomo":
+            root
+            / "final_figures"
+            / "Figure6"
+            / "source_data"
+            / "Figure6B_leave_one_model_out_vote_consensus.csv",
+    }
+
+    missing = [
+        (name, path)
+        for name, path in paths.items()
+        if not path.exists()
+    ]
+
+    if missing:
+
+        label, path = missing[0]
+
+        raise FileNotFoundError(
+            f"Missing file [{label}]: {path}"
+        )
+
+    return {
+        name: pd.read_csv(path)
+        for name, path in paths.items()
+    }
 
 
 # ============================================================
-# 2. Query interpretation
+# Deterministic query parsing
 # ============================================================
 
 def infer_target_scale(
     query: str,
 ) -> Optional[str]:
     """
-    Detect an explicitly requested magnification.
+    Infer an explicitly requested magnification from text.
 
     Returns:
         "2p5x"
@@ -93,15 +278,31 @@ def infer_target_scale(
         None
     """
 
-    q = query.lower()
+    text = (
+        query
+        .lower()
+        .replace("×", "x")
+    )
 
-    if "2.5x" in q or "2p5x" in q:
+    # 2.5x variants
+    if re.search(
+        r"\b2(?:\.|p)5\s*x\b",
+        text,
+    ):
         return "2p5x"
 
-    if "10x" in q:
+    # 10x
+    if re.search(
+        r"\b10\s*x\b",
+        text,
+    ):
         return "10x"
 
-    if "40x" in q:
+    # 40x
+    if re.search(
+        r"\b40\s*x\b",
+        text,
+    ):
         return "40x"
 
     return None
@@ -111,59 +312,89 @@ def infer_ranking_intent(
     query: str,
 ) -> str:
     """
-    Infer how candidate molecular programs
-    should be ranked.
+    Infer the scientific ranking intent from a query.
 
-    Returns:
-        preference
-        visibility
+    Priority matters:
+
         robustness
+            >
+        visibility
+            >
+        preference
+            >
         general
+
+    This prevents a query such as
+
+        "most robust 10x preference"
+
+    from being incorrectly classified as simple preference.
     """
 
-    q = query.lower()
+    text = query.lower()
 
-    robustness_terms = [
+    # --------------------------------------------------------
+    # Robustness
+    # --------------------------------------------------------
+
+    robustness_terms = (
         "robust",
         "robustness",
         "stable",
         "stability",
+        "reproducible",
+        "reproducibility",
         "consistent",
-        "reliable",
-    ]
+        "consistency",
+        "leave-one-model",
+        "leave one model",
+        "lomo",
+        "resistant",
+    )
 
-    visibility_terms = [
-        "strong",
-        "strongest",
-        "highest",
-        "visibility",
-        "visible",
-        "signal",
-    ]
-
-    preference_terms = [
-        "prefer",
-        "preference",
-        "preferred",
-    ]
-
-    # Robustness is checked first because
-    # "most robust 10x preference"
-    # contains both robust and preference.
     if any(
-        term in q
+        term in text
         for term in robustness_terms
     ):
         return "robustness"
 
+    # --------------------------------------------------------
+    # Visibility / absolute strength
+    # --------------------------------------------------------
+
+    visibility_terms = (
+        "strongest",
+        "stronger",
+        "strength",
+        "visibility",
+        "visible",
+        "highest visibility",
+        "most visible",
+        "largest",
+        "highest",
+    )
+
     if any(
-        term in q
+        term in text
         for term in visibility_terms
     ):
         return "visibility"
 
+    # --------------------------------------------------------
+    # Preferred scale
+    # --------------------------------------------------------
+
+    preference_terms = (
+        "prefer",
+        "preferred",
+        "preference",
+        "optimal scale",
+        "optimum scale",
+        "best scale",
+    )
+
     if any(
-        term in q
+        term in text
         for term in preference_terms
     ):
         return "preference"
@@ -172,34 +403,73 @@ def infer_ranking_intent(
 
 
 # ============================================================
-# 3. Candidate search
+# Candidate search and query-aware ranking
 # ============================================================
 
 def search_program_candidates(
     query: str,
+    *,
+    ranking_intent: Any = _QUERY_UNSET,
+    target_scale: Any = _QUERY_UNSET,
 ) -> List[str]:
     """
     Search and rank eligible molecular programs.
 
+    Parameters
+    ----------
+    query:
+        Original natural-language user query.
+
+    ranking_intent:
+        Optional structured override supplied by the
+        LLM query interpreter.
+
+        Supported:
+            preference
+            visibility
+            robustness
+            general
+
+        If omitted, deterministic parsing of `query`
+        is used.
+
+    target_scale:
+        Optional structured scale override.
+
+        Supported:
+            2p5x
+            10x
+            40x
+            None
+
+        IMPORTANT:
+        Explicit None means:
+            "the structured interpreter found no requested scale"
+
+        It therefore must NOT trigger re-parsing of the
+        original query.
+
+    Ranking rules
+    -------------
+
     preference:
-        target-scale votes
+        target-scale model votes
         -> target-scale visibility
 
     visibility:
         target-scale visibility
-        -> target-scale votes
+        -> target-scale model votes
 
     robustness + target scale:
-        require actual consensus preference
-        for requested scale
-        -> LOMO compatibility
+        require actual consensus preference for requested scale
+        -> LOMO summary compatibility
         -> optimum stability
         -> vote margin
-        -> votes
-        -> visibility
+        -> target-scale votes
+        -> target-scale visibility
 
     robustness without target scale:
-        LOMO compatibility
+        LOMO summary compatibility
         -> optimum stability
         -> vote margin
         -> model agreement
@@ -227,19 +497,59 @@ def search_program_candidates(
     # Eligible programs only
     # --------------------------------------------------------
 
-    if "eligible_main" in consensus.columns:
+    if (
+        "eligible_main"
+        in consensus.columns
+    ):
 
         consensus = consensus[
-            consensus["eligible_main"] == True
+            consensus[
+                "eligible_main"
+            ]
+            ==
+            True
         ].copy()
 
-    target_scale = infer_target_scale(
-        query
-    )
+    # --------------------------------------------------------
+    # Resolve structured or legacy query interpretation
+    # --------------------------------------------------------
 
-    ranking_intent = infer_ranking_intent(
-        query
-    )
+    if target_scale is _QUERY_UNSET:
+
+        resolved_scale = (
+            infer_target_scale(
+                query
+            )
+        )
+
+    else:
+
+        resolved_scale = (
+            _normalize_scale(
+                target_scale
+            )
+            if target_scale is not None
+            else None
+        )
+
+    if ranking_intent is _QUERY_UNSET:
+
+        resolved_intent = (
+            infer_ranking_intent(
+                query
+            )
+        )
+
+    else:
+
+        resolved_intent = (
+            _validate_intent(
+                ranking_intent
+            )
+        )
+
+    target_scale = resolved_scale
+    ranking_intent = resolved_intent
 
     ranked = consensus.copy()
 
@@ -250,7 +560,8 @@ def search_program_candidates(
     if target_scale is not None:
 
         vote_col = (
-            f"n_models_prefer_{target_scale}"
+            "n_models_prefer_"
+            f"{target_scale}"
         )
 
         if vote_col not in ranked.columns:
@@ -320,28 +631,58 @@ def search_program_candidates(
     # Add robustness evidence
     # ========================================================
 
+    robustness_columns_needed = [
+        "program",
+        "minimum_vote_margin",
+        "median_vote_margin",
+        "compatible_exclusions",
+        "n_exclusions",
+        "median_optimum_stability_fraction",
+    ]
+
+    existing_robustness_columns = [
+        column
+        for column in robustness_columns_needed
+        if column in robustness.columns
+    ]
+
     robustness_subset = robustness[
-        [
-            "program",
-            "minimum_vote_margin",
-            "median_vote_margin",
-            "compatible_exclusions",
-            "n_exclusions",
-            "median_optimum_stability_fraction",
-        ]
+        existing_robustness_columns
     ].copy()
 
-    robustness_subset[
-        "lomo_summary_fraction"
-    ] = (
+    if (
+        "compatible_exclusions"
+        in robustness_subset.columns
+        and
+        "n_exclusions"
+        in robustness_subset.columns
+    ):
+
+        denominator = (
+            robustness_subset[
+                "n_exclusions"
+            ]
+            .replace(
+                0,
+                pd.NA,
+            )
+        )
+
         robustness_subset[
-            "compatible_exclusions"
-        ]
-        /
+            "lomo_summary_fraction"
+        ] = (
+            robustness_subset[
+                "compatible_exclusions"
+            ]
+            /
+            denominator
+        )
+
+    else:
+
         robustness_subset[
-            "n_exclusions"
-        ]
-    )
+            "lomo_summary_fraction"
+        ] = float("nan")
 
     ranked = ranked.merge(
         robustness_subset,
@@ -349,21 +690,24 @@ def search_program_candidates(
         how="left",
     )
 
-    # Programs with unavailable robustness evidence
-    # should rank after programs with actual evidence.
-    robustness_columns = [
+    # Missing robustness should rank after real evidence.
+    robustness_sort_columns = [
         "minimum_vote_margin",
         "median_vote_margin",
         "lomo_summary_fraction",
         "median_optimum_stability_fraction",
     ]
 
-    for column in robustness_columns:
+    for column in robustness_sort_columns:
 
-        ranked[column] = (
-            ranked[column]
-            .fillna(-1)
-        )
+        if column not in ranked.columns:
+            ranked[column] = -1.0
+
+        else:
+            ranked[column] = (
+                ranked[column]
+                .fillna(-1.0)
+            )
 
     # ========================================================
     # Query-aware ranking
@@ -372,11 +716,14 @@ def search_program_candidates(
     # --------------------------------------------------------
     # Preference
     #
+    # Example:
     # Which programs prefer 10x?
     # --------------------------------------------------------
 
     if (
-        ranking_intent == "preference"
+        ranking_intent
+        ==
+        "preference"
         and
         target_scale is not None
     ):
@@ -390,16 +737,20 @@ def search_program_candidates(
                 False,
                 False,
             ],
+            na_position="last",
         )
 
     # --------------------------------------------------------
     # Visibility
     #
+    # Example:
     # Which programs are strongest at 10x?
     # --------------------------------------------------------
 
     elif (
-        ranking_intent == "visibility"
+        ranking_intent
+        ==
+        "visibility"
         and
         target_scale is not None
     ):
@@ -413,25 +764,27 @@ def search_program_candidates(
                 False,
                 False,
             ],
+            na_position="last",
         )
 
     # --------------------------------------------------------
-    # Robustness + target scale
+    # Robustness + requested target scale
     #
-    # Which programs have the most robust
-    # 10x preference?
+    # Example:
+    # Which programs have the most robust 10x preference?
     # --------------------------------------------------------
 
     elif (
-        ranking_intent == "robustness"
+        ranking_intent
+        ==
+        "robustness"
         and
         target_scale is not None
     ):
 
-        # Important:
-        # Only programs whose consensus preferred
-        # scale actually matches the requested scale
-        # are eligible for this ranking.
+        # Scientific requirement:
+        # a "robust 10x preference" must first actually
+        # have 10x as the vote-consensus preferred scale.
         ranked = ranked[
             ranked[
                 "target_scale_match"
@@ -455,13 +808,18 @@ def search_program_candidates(
                 False,
                 False,
             ],
+            na_position="last",
         )
 
     # --------------------------------------------------------
-    # Robustness without target scale
+    # Robustness without a requested target scale
     # --------------------------------------------------------
 
-    elif ranking_intent == "robustness":
+    elif (
+        ranking_intent
+        ==
+        "robustness"
+    ):
 
         ranked = ranked.sort_values(
             [
@@ -476,61 +834,97 @@ def search_program_candidates(
                 False,
                 False,
             ],
+            na_position="last",
         )
 
     # --------------------------------------------------------
-    # General
+    # General search
     # --------------------------------------------------------
 
     else:
 
-        ranked = ranked.sort_values(
-            [
-                "max_models_agree",
-                "coverage_fraction",
-            ],
-            ascending=[
-                False,
-                False,
-            ],
-        )
+        sort_columns = []
 
-    return ranked[
-        "program"
-    ].tolist()
+        ascending = []
+
+        if (
+            "max_models_agree"
+            in ranked.columns
+        ):
+            sort_columns.append(
+                "max_models_agree"
+            )
+            ascending.append(
+                False
+            )
+
+        if (
+            "coverage_fraction"
+            in ranked.columns
+        ):
+            sort_columns.append(
+                "coverage_fraction"
+            )
+            ascending.append(
+                False
+            )
+
+        if sort_columns:
+
+            ranked = ranked.sort_values(
+                sort_columns,
+                ascending=ascending,
+                na_position="last",
+            )
+
+    return (
+        ranked[
+            "program"
+        ]
+        .astype(str)
+        .tolist()
+    )
 
 
 # ============================================================
-# 4. Evidence collection
+# Evidence collection
 # ============================================================
 
 def collect_program_evidence(
     program: str,
 ) -> Dict[str, Any]:
     """
-    Collect all available real evidence
-    for one molecular program.
+    Collect all available real evidence for one molecular
+    program.
+
+    Returned evidence is deliberately structured so the
+    deterministic evidence gate and the LLM explanation layer
+    remain separate.
     """
 
     tables = load_tables()
 
-    consensus_df = tables[
+    consensus_table = tables[
         "consensus"
     ]
 
-    cross_df = tables[
+    cross_model_table = tables[
         "cross_model"
     ]
 
-    preferred_df = tables[
+    preferred_table = tables[
         "preferred_scale"
     ]
 
-    robustness_df = tables[
+    visibility_table = tables[
+        "visibility"
+    ]
+
+    robustness_table = tables[
         "robustness"
     ]
 
-    lomo_df = tables[
+    lomo_table = tables[
         "lomo"
     ]
 
@@ -538,74 +932,95 @@ def collect_program_evidence(
     # Consensus
     # ========================================================
 
-    rows = consensus_df[
-        consensus_df[
+    consensus_rows = consensus_table[
+        consensus_table[
             "program"
         ]
         ==
         program
     ]
 
-    if rows.empty:
+    if consensus_rows.empty:
 
         raise ValueError(
-            f"Unknown program: {program}"
+            "Program not found in consensus table: "
+            f"{program}"
         )
 
-    row = rows.iloc[
-        0
-    ]
+    consensus_row = (
+        consensus_rows
+        .iloc[0]
+    )
+
+    preferred_scale = _native(
+        consensus_row.get(
+            "consensus_preferred_scale"
+        )
+    )
+
+    max_models_agree = _native(
+        consensus_row.get(
+            "max_models_agree"
+        )
+    )
 
     consensus = {
         "preferred_scale":
-            str(
-                row[
-                    "consensus_preferred_scale"
-                ]
-            ),
+            preferred_scale,
 
         "max_models_agree":
-            int(
-                row[
-                    "max_models_agree"
-                ]
-            ),
+            max_models_agree,
 
         "votes": {
             "2p5x":
-                int(
-                    row[
+                _native(
+                    consensus_row.get(
                         "n_models_prefer_2p5x"
-                    ]
+                    )
                 ),
 
             "10x":
-                int(
-                    row[
+                _native(
+                    consensus_row.get(
                         "n_models_prefer_10x"
-                    ]
+                    )
                 ),
 
             "40x":
-                int(
-                    row[
+                _native(
+                    consensus_row.get(
                         "n_models_prefer_40x"
-                    ]
+                    )
                 ),
         },
 
+        "n_genes_total":
+            _native(
+                consensus_row.get(
+                    "n_genes_total"
+                )
+            ),
+
+        "n_genes_top5000":
+            _native(
+                consensus_row.get(
+                    "n_genes_top5000"
+                )
+            ),
+
         "coverage_fraction":
-            float(
-                row[
+            _native(
+                consensus_row.get(
                     "coverage_fraction"
-                ]
+                )
             ),
 
         "eligible_main":
             bool(
-                row[
-                    "eligible_main"
-                ]
+                consensus_row.get(
+                    "eligible_main",
+                    True,
+                )
             ),
     }
 
@@ -613,354 +1028,486 @@ def collect_program_evidence(
     # Cross-model visibility
     # ========================================================
 
-    cross_rows = cross_df[
-        cross_df[
-            "program"
+    cross_rows = (
+        cross_model_table[
+            cross_model_table[
+                "program"
+            ]
+            ==
+            program
         ]
-        ==
-        program
-    ].copy()
+        .copy()
+    )
 
-    if cross_rows.empty:
-
-        raise ValueError(
-            "No cross-model visibility "
-            f"available for: {program}"
-        )
-
-    cross_visibility: Dict[
+    cross_model_visibility: Dict[
         str,
-        Dict[str, Any]
+        Dict[str, Any],
     ] = {}
 
-    for _, r in cross_rows.iterrows():
+    for _, row in cross_rows.iterrows():
 
         scale = str(
-            r[
+            row[
                 "scale"
             ]
         )
 
-        cross_visibility[
+        cross_model_visibility[
             scale
         ] = {
-            "median":
-                float(
-                    r[
+            "median_across_models":
+                _native(
+                    row.get(
                         "median_across_models"
-                    ]
+                    )
                 ),
 
-            "mean":
-                float(
-                    r[
+            "mean_across_models":
+                _native(
+                    row.get(
                         "mean_across_models"
-                    ]
+                    )
                 ),
 
-            "min":
-                float(
-                    r[
+            "min_across_models":
+                _native(
+                    row.get(
                         "min_across_models"
-                    ]
+                    )
                 ),
 
-            "max":
-                float(
-                    r[
+            "max_across_models":
+                _native(
+                    row.get(
                         "max_across_models"
-                    ]
+                    )
                 ),
 
             "n_models":
-                int(
-                    r[
+                _native(
+                    row.get(
                         "n_models"
-                    ]
+                    )
                 ),
         }
 
-    ranked_cross = (
-        cross_rows
-        .sort_values(
-            "median_across_models",
-            ascending=False,
-        )
-        .reset_index(
-            drop=True
-        )
-    )
+    # ========================================================
+    # Cross-model median optimum
+    # ========================================================
 
-    best_row = ranked_cross.iloc[
-        0
-    ]
-
-    best_scale = str(
-        best_row[
-            "scale"
+    valid_optimum = (
+        cross_rows[
+            [
+                "scale",
+                "median_across_models",
+            ]
         ]
+        .dropna(
+            subset=[
+                "median_across_models"
+            ]
+        )
+        .copy()
     )
 
-    best_visibility = float(
-        best_row[
-            "median_across_models"
-        ]
-    )
+    if valid_optimum.empty:
 
-    second_best_visibility = None
-    cross_model_margin = None
+        cross_model_optimum = {
+            "scale":
+                None,
 
-    if len(
-        ranked_cross
-    ) >= 2:
+            "median_visibility":
+                None,
 
-        second_best_visibility = float(
-            ranked_cross.iloc[
-                1
-            ][
+            "second_best_median_visibility":
+                None,
+
+            "margin":
+                None,
+        }
+
+    else:
+
+        valid_optimum = (
+            valid_optimum.sort_values(
+                "median_across_models",
+                ascending=False,
+            )
+        )
+
+        best = (
+            valid_optimum
+            .iloc[0]
+        )
+
+        second = (
+            valid_optimum
+            .iloc[1]
+            if len(
+                valid_optimum
+            ) > 1
+            else None
+        )
+
+        best_value = float(
+            best[
                 "median_across_models"
             ]
         )
 
-        cross_model_margin = (
-            best_visibility
+        second_value = (
+            float(
+                second[
+                    "median_across_models"
+                ]
+            )
+            if second is not None
+            else None
+        )
+
+        margin = (
+            best_value
             -
-            second_best_visibility
+            second_value
+            if second_value is not None
+            else None
         )
 
+        cross_model_optimum = {
+            "scale":
+                str(
+                    best[
+                        "scale"
+                    ]
+                ),
+
+            "median_visibility":
+                best_value,
+
+            "second_best_median_visibility":
+                second_value,
+
+            "margin":
+                margin,
+        }
+
     # ========================================================
-    # Evidence alignment
+    # Model-level preferred scales
     # ========================================================
 
-    vote_preferred_scale = (
-        consensus[
-            "preferred_scale"
+    preferred_rows = (
+        preferred_table[
+            preferred_table[
+                "program"
+            ]
+            ==
+            program
         ]
+        .copy()
     )
 
-    # A tie is treated as unresolved consensus,
-    # not as a direct conflict.
-    evidence_concordance = (
-        vote_preferred_scale
-        !=
-        "tie"
-        and
-        vote_preferred_scale
-        ==
-        best_scale
+    model_preferences = _records(
+        preferred_rows
     )
-
-    evidence_conflict = (
-        vote_preferred_scale
-        !=
-        "tie"
-        and
-        vote_preferred_scale
-        !=
-        best_scale
-    )
-
-    evidence_alignment = {
-        "vote_preferred_scale":
-            vote_preferred_scale,
-
-        "cross_model_median_optimum_scale":
-            best_scale,
-
-        "concordant":
-            evidence_concordance,
-
-        "conflict":
-            evidence_conflict,
-    }
 
     # ========================================================
-    # Model-level preferences
+    # Model × scale visibility
     # ========================================================
 
-    preferred_rows = preferred_df[
-        preferred_df[
-            "program"
+    visibility_rows = (
+        visibility_table[
+            visibility_table[
+                "program"
+            ]
+            ==
+            program
         ]
-        ==
-        program
-    ].copy()
+        .copy()
+    )
 
-    model_preferences = []
-
-    for _, r in preferred_rows.iterrows():
-
-        model_preferences.append(
-            {
-                "model":
-                    str(
-                        r[
-                            "model"
-                        ]
-                    ),
-
-                "preferred_scale":
-                    str(
-                        r[
-                            "preferred_scale"
-                        ]
-                    ),
-
-                "best_median_pearson":
-                    float(
-                        r[
-                            "best_median_pearson"
-                        ]
-                    ),
-
-                "second_best_median_pearson":
-                    float(
-                        r[
-                            "second_best_median_pearson"
-                        ]
-                    ),
-
-                "scale_margin":
-                    float(
-                        r[
-                            "scale_margin"
-                        ]
-                    ),
-            }
-        )
+    model_scale_visibility = _records(
+        visibility_rows
+    )
 
     # ========================================================
     # Robustness summary
     # ========================================================
 
-    robust_rows = robustness_df[
-        robustness_df[
-            "program"
+    robustness_rows = (
+        robustness_table[
+            robustness_table[
+                "program"
+            ]
+            ==
+            program
         ]
-        ==
-        program
-    ]
+    )
 
-    if robust_rows.empty:
+    if robustness_rows.empty:
 
         robustness = {
             "available":
                 False,
+
+            "minimum_vote_margin":
+                None,
+
+            "median_vote_margin":
+                None,
+
+            "compatible_exclusions":
+                None,
+
+            "n_exclusions":
+                None,
+
+            "median_optimum_stability_fraction":
+                None,
         }
 
     else:
 
-        r = robust_rows.iloc[
-            0
-        ]
+        row = (
+            robustness_rows
+            .iloc[0]
+        )
 
         robustness = {
             "available":
                 True,
 
             "minimum_vote_margin":
-                int(
-                    r[
+                _native(
+                    row.get(
                         "minimum_vote_margin"
-                    ]
+                    )
                 ),
 
             "median_vote_margin":
-                float(
-                    r[
+                _native(
+                    row.get(
                         "median_vote_margin"
-                    ]
+                    )
                 ),
 
             "compatible_exclusions":
-                int(
-                    r[
+                _native(
+                    row.get(
                         "compatible_exclusions"
-                    ]
+                    )
                 ),
 
             "n_exclusions":
-                int(
-                    r[
+                _native(
+                    row.get(
                         "n_exclusions"
-                    ]
+                    )
                 ),
 
             "median_optimum_stability_fraction":
-                float(
-                    r[
+                _native(
+                    row.get(
                         "median_optimum_stability_fraction"
-                    ]
+                    )
                 ),
         }
 
     # ========================================================
-    # Leave-one-model-out
+    # Leave-one-model-out evidence
     # ========================================================
 
-    lomo_rows = lomo_df[
-        lomo_df[
-            "program"
+    lomo_rows = (
+        lomo_table[
+            lomo_table[
+                "program"
+            ]
+            ==
+            program
         ]
-        ==
-        program
-    ].copy()
+        .copy()
+    )
 
     if lomo_rows.empty:
 
         lomo = {
             "available":
                 False,
+
+            "compatible_exclusions":
+                None,
+
+            "n_exclusions":
+                None,
+
+            "compatibility_fraction":
+                None,
+
+            "minimum_vote_margin":
+                None,
+
+            "median_vote_margin":
+                None,
+
+            "records":
+                [],
         }
 
     else:
 
-        n_total = len(
-            lomo_rows
+        n_exclusions = int(
+            len(
+                lomo_rows
+            )
         )
 
-        n_compatible = int(
+        compatible_series = (
             lomo_rows[
                 "compatible_with_full"
-            ].sum()
+            ]
+            if (
+                "compatible_with_full"
+                in lomo_rows.columns
+            )
+            else pd.Series(
+                [False]
+                * n_exclusions
+            )
         )
+
+        compatible_exclusions = int(
+            compatible_series
+            .fillna(False)
+            .astype(bool)
+            .sum()
+        )
+
+        compatibility_fraction = (
+            compatible_exclusions
+            /
+            n_exclusions
+            if n_exclusions > 0
+            else None
+        )
+
+        if (
+            "vote_margin"
+            in lomo_rows.columns
+        ):
+
+            margins = (
+                lomo_rows[
+                    "vote_margin"
+                ]
+                .dropna()
+            )
+
+            minimum_vote_margin = (
+                float(
+                    margins.min()
+                )
+                if not margins.empty
+                else None
+            )
+
+            median_vote_margin = (
+                float(
+                    margins.median()
+                )
+                if not margins.empty
+                else None
+            )
+
+        else:
+
+            minimum_vote_margin = None
+            median_vote_margin = None
 
         lomo = {
             "available":
                 True,
 
-            "n_exclusions":
-                int(
-                    n_total
-                ),
-
             "compatible_exclusions":
-                n_compatible,
+                compatible_exclusions,
+
+            "n_exclusions":
+                n_exclusions,
 
             "compatibility_fraction":
-                float(
-                    n_compatible
-                    /
-                    n_total
-                ),
+                compatibility_fraction,
 
             "minimum_vote_margin":
-                int(
-                    lomo_rows[
-                        "vote_margin"
-                    ].min()
-                ),
+                minimum_vote_margin,
 
             "median_vote_margin":
-                float(
-                    lomo_rows[
-                        "vote_margin"
-                    ].median()
+                median_vote_margin,
+
+            "records":
+                _records(
+                    lomo_rows
                 ),
         }
 
     # ========================================================
-    # Structured evidence object
+    # Agreement between two aggregation views
+    # ========================================================
+
+    median_optimum_scale = (
+        cross_model_optimum[
+            "scale"
+        ]
+    )
+
+    concordant = (
+        preferred_scale
+        not in (
+            None,
+            "tie",
+        )
+        and
+        median_optimum_scale
+        is not None
+        and
+        preferred_scale
+        ==
+        median_optimum_scale
+    )
+
+    conflict = (
+        preferred_scale
+        not in (
+            None,
+            "tie",
+        )
+        and
+        median_optimum_scale
+        is not None
+        and
+        preferred_scale
+        !=
+        median_optimum_scale
+    )
+
+    evidence_alignment = {
+        "vote_preferred_scale":
+            preferred_scale,
+
+        "cross_model_median_optimum_scale":
+            median_optimum_scale,
+
+        "concordant":
+            bool(
+                concordant
+            ),
+
+        # A vote tie is unresolved, not a direct conflict.
+        "conflict":
+            bool(
+                conflict
+            ),
+    }
+
+    # ========================================================
+    # Final evidence object
     # ========================================================
 
     return {
@@ -971,38 +1518,30 @@ def collect_program_evidence(
             consensus,
 
         "cross_model_visibility":
-            cross_visibility,
+            cross_model_visibility,
 
-        "cross_model_optimum": {
-            "scale":
-                best_scale,
-
-            "median_visibility":
-                best_visibility,
-
-            "second_best_median_visibility":
-                second_best_visibility,
-
-            "margin":
-                cross_model_margin,
-        },
-
-        "evidence_alignment":
-            evidence_alignment,
+        "cross_model_optimum":
+            cross_model_optimum,
 
         "model_preferences":
             model_preferences,
+
+        "model_scale_visibility":
+            model_scale_visibility,
 
         "robustness":
             robustness,
 
         "lomo":
             lomo,
+
+        "evidence_alignment":
+            evidence_alignment,
     }
 
 
 # ============================================================
-# 5. Deterministic evidence gate
+# Deterministic evidence gate
 # ============================================================
 
 def evaluate_program_evidence(
@@ -1010,340 +1549,339 @@ def evaluate_program_evidence(
     target_scale: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Deterministically evaluate support for an exploratory
-    morphology-molecular scale hypothesis.
+    Apply deterministic scientific evidence rules.
 
-    Decision states:
+    This function does not use an LLM.
 
-        supported_exploratory_hypothesis
-        conflicting_evidence
-        not_supported
-        insufficient_robustness_evidence
-        not_eligible
+    Main gate
+    ---------
 
-    Important:
-        This evaluates consistency of evidence in the
-        available dataset.
+    Consensus:
+        preferred scale must not be a tie
+        and >= 5 / 8 models must agree.
 
-        It does NOT establish:
-            clinical biomarker validity,
-            biological causality,
-            patient-level molecular diagnosis.
+    Target:
+        if the user requested a scale, the vote-based
+        consensus preferred scale must equal that scale.
+
+    Robustness:
+        robustness summary must be available;
+        all reported exclusions must be compatible;
+        median optimum stability >= 0.75;
+        LOMO must be available;
+        LOMO compatibility >= 0.875.
+
+    Important
+    ---------
+    Evidence conflict is a diagnostic dimension.
+
+    For backward compatibility, a fully supported program
+    with aggregation disagreement may still return the raw
+    status "conflicting_evidence". nodes.py normalizes this
+    into the primary support status while retaining the
+    conflict flag.
     """
 
-    consensus = evidence[
-        "consensus"
-    ]
-
-    robustness = evidence[
-        "robustness"
-    ]
-
-    lomo = evidence[
-        "lomo"
-    ]
-
-    alignment = evidence[
-        "evidence_alignment"
-    ]
-
-    reasons: List[str] = []
-
-    # ========================================================
-    # A. Eligibility
-    # ========================================================
-
-    if not consensus[
-        "eligible_main"
-    ]:
-
-        return {
-            "status":
-                "not_eligible",
-
-            "consensus_ok":
-                False,
-
-            "target_ok":
-                False,
-
-            "robust_ok":
-                False,
-
-            "evidence_conflict":
-                alignment[
-                    "conflict"
-                ],
-
-            "reasons": [
-                "Program is not eligible "
-                "for the main analysis."
-            ],
-        }
-
-    # ========================================================
-    # B. Robustness evidence availability
-    # ========================================================
-
-    if not robustness[
-        "available"
-    ]:
-
-        return {
-            "status":
-                "insufficient_robustness_evidence",
-
-            "consensus_ok":
-                False,
-
-            "target_ok":
-                False,
-
-            "robust_ok":
-                False,
-
-            "evidence_conflict":
-                alignment[
-                    "conflict"
-                ],
-
-            "reasons": [
-                "No program-level robustness "
-                "summary is available."
-            ],
-        }
-
-    if not lomo[
-        "available"
-    ]:
-
-        return {
-            "status":
-                "insufficient_robustness_evidence",
-
-            "consensus_ok":
-                False,
-
-            "target_ok":
-                False,
-
-            "robust_ok":
-                False,
-
-            "evidence_conflict":
-                alignment[
-                    "conflict"
-                ],
-
-            "reasons": [
-                "No leave-one-model-out "
-                "evidence is available."
-            ],
-        }
-
-    # ========================================================
-    # C. Cross-model vote consensus
-    # ========================================================
-
-    consensus_ok = (
-        consensus[
-            "preferred_scale"
-        ]
-        !=
-        "tie"
-        and
-        consensus[
-            "max_models_agree"
-        ]
-        >=
-        5
+    target_scale = _normalize_scale(
+        target_scale
     )
 
-    if (
-        consensus[
+    consensus = evidence.get(
+        "consensus",
+        {},
+    )
+
+    robustness = evidence.get(
+        "robustness",
+        {},
+    )
+
+    lomo = evidence.get(
+        "lomo",
+        {},
+    )
+
+    alignment = evidence.get(
+        "evidence_alignment",
+        {},
+    )
+
+    preferred_scale = (
+        consensus.get(
             "preferred_scale"
-        ]
-        ==
-        "tie"
-    ):
-
-        reasons.append(
-            "Cross-model preferred scale "
-            "is tied."
         )
+    )
 
-    elif (
-        consensus[
+    max_models_agree = (
+        consensus.get(
             "max_models_agree"
-        ]
-        <
-        5
-    ):
-
-        reasons.append(
-            "Fewer than 5 of 8 models "
-            "agree on the preferred scale."
         )
+    )
 
-    # ========================================================
-    # D. Requested-scale agreement
-    # ========================================================
+    eligible_main = bool(
+        consensus.get(
+            "eligible_main",
+            True,
+        )
+    )
+
+    # --------------------------------------------------------
+    # Consensus gate
+    # --------------------------------------------------------
+
+    consensus_ok = (
+        preferred_scale
+        not in (
+            None,
+            "tie",
+        )
+        and
+        max_models_agree
+        is not None
+        and
+        max_models_agree >= 5
+    )
+
+    # --------------------------------------------------------
+    # Target-scale gate
+    # --------------------------------------------------------
 
     target_ok = (
         target_scale is None
         or
-        consensus[
-            "preferred_scale"
-        ]
+        preferred_scale
         ==
         target_scale
     )
 
-    if (
-        target_scale is not None
-        and
-        not target_ok
-    ):
+    # --------------------------------------------------------
+    # Robustness components
+    # --------------------------------------------------------
 
-        reasons.append(
-            "Consensus preferred scale "
-            f"is {consensus['preferred_scale']}, "
-            f"not {target_scale}."
+    robustness_available = bool(
+        robustness.get(
+            "available",
+            False,
         )
+    )
 
-    # ========================================================
-    # E. Robustness gate
-    # ========================================================
+    compatible_exclusions = (
+        robustness.get(
+            "compatible_exclusions"
+        )
+    )
+
+    n_exclusions = robustness.get(
+        "n_exclusions"
+    )
+
+    stability = robustness.get(
+        "median_optimum_stability_fraction"
+    )
+
+    lomo_available = bool(
+        lomo.get(
+            "available",
+            False,
+        )
+    )
+
+    lomo_fraction = lomo.get(
+        "compatibility_fraction"
+    )
+
+    robustness_summary_ok = (
+        robustness_available
+        and
+        compatible_exclusions
+        is not None
+        and
+        n_exclusions
+        is not None
+        and
+        n_exclusions > 0
+        and
+        compatible_exclusions
+        ==
+        n_exclusions
+        and
+        stability
+        is not None
+        and
+        stability >= 0.75
+    )
+
+    lomo_ok = (
+        lomo_available
+        and
+        lomo_fraction
+        is not None
+        and
+        lomo_fraction >= 0.875
+    )
 
     robust_ok = (
-        robustness[
-            "compatible_exclusions"
-        ]
-        ==
-        robustness[
-            "n_exclusions"
-        ]
+        robustness_summary_ok
         and
-        robustness[
-            "median_optimum_stability_fraction"
-        ]
-        >=
-        0.75
-        and
-        lomo[
-            "compatibility_fraction"
-        ]
-        >=
-        0.875
+        lomo_ok
     )
-
-    if not robust_ok:
-
-        reasons.append(
-            "Program does not pass "
-            "the predefined robustness gate."
-        )
-
-    # ========================================================
-    # F. Evidence alignment
-    # ========================================================
 
     evidence_conflict = bool(
-        alignment[
-            "conflict"
-        ]
+        alignment.get(
+            "conflict",
+            False,
+        )
     )
+
+    # --------------------------------------------------------
+    # Reasons
+    # --------------------------------------------------------
+
+    reasons: List[str] = []
+
+    if not eligible_main:
+
+        reasons.append(
+            "Program is not eligible for the main analysis."
+        )
+
+    if not consensus_ok:
+
+        reasons.append(
+            "Cross-model consensus gate failed."
+        )
+
+    if not target_ok:
+
+        reasons.append(
+            "Vote-based preferred scale does not match "
+            "the requested target scale."
+        )
+
+    if not robustness_available:
+
+        reasons.append(
+            "Robustness summary evidence is unavailable."
+        )
+
+    if robustness_available and not robustness_summary_ok:
+
+        reasons.append(
+            "Robustness gate failed."
+        )
+
+    if not lomo_available:
+
+        reasons.append(
+            "Leave-one-model-out evidence is unavailable."
+        )
+
+    elif not lomo_ok:
+
+        reasons.append(
+            "Leave-one-model-out compatibility gate failed."
+        )
 
     if evidence_conflict:
 
         reasons.append(
-            "Vote-based preferred scale "
-            "and cross-model median optimum disagree."
+            "Vote-based preferred scale and cross-model "
+            "median optimum disagree."
         )
 
-    # ========================================================
-    # G. Final decision
-    # ========================================================
+    # --------------------------------------------------------
+    # Primary / raw status
+    # --------------------------------------------------------
 
-    basic_support = (
+    if not eligible_main:
+
+        status = (
+            "not_eligible"
+        )
+
+    elif (
+        not robustness_available
+        or
+        not lomo_available
+    ):
+
+        # Preserve explicit missing-evidence status where the
+        # support question cannot be fully adjudicated.
+        status = (
+            "insufficient_robustness_evidence"
+        )
+
+    elif (
         consensus_ok
         and
         target_ok
         and
         robust_ok
-    )
-
-    # Strong underlying evidence exists,
-    # but two aggregation strategies disagree.
-    if (
-        basic_support
-        and
-        evidence_conflict
     ):
 
-        status = (
-            "conflicting_evidence"
-        )
+        if evidence_conflict:
 
-        reasons.append(
-            "The hypothesis passes consensus "
-            "and robustness gates, but the "
-            "preferred scale is sensitive to "
-            "the aggregation definition."
-        )
+            # Backward-compatible raw status.
+            # nodes.py separates this diagnostic from the
+            # primary support status.
+            status = (
+                "conflicting_evidence"
+            )
 
-    # Fully aligned support
-    elif (
-        basic_support
-        and
-        not evidence_conflict
-    ):
+        else:
 
-        status = (
-            "supported_exploratory_hypothesis"
-        )
+            status = (
+                "supported_exploratory_hypothesis"
+            )
 
-        reasons.append(
-            "Program passes cross-model consensus, "
-            "robustness, and evidence-alignment checks."
-        )
+            reasons.append(
+                "Program passes cross-model consensus, "
+                "robustness, and evidence-alignment checks."
+            )
 
-    # One or more required conditions fail
     else:
 
         status = (
             "not_supported"
         )
 
-    # ========================================================
-    # H. Structured decision
-    # ========================================================
-
     return {
         "status":
             status,
 
         "consensus_ok":
-            consensus_ok,
+            bool(
+                consensus_ok
+            ),
 
         "target_ok":
-            target_ok,
+            bool(
+                target_ok
+            ),
 
         "robust_ok":
-            robust_ok,
+            bool(
+                robust_ok
+            ),
+
+        "vote_preferred_scale":
+            preferred_scale,
+
+        "cross_model_median_optimum_scale":
+            alignment.get(
+                "cross_model_median_optimum_scale"
+            ),
+
+        "evidence_concordant":
+            bool(
+                alignment.get(
+                    "concordant",
+                    False,
+                )
+            ),
 
         "evidence_conflict":
             evidence_conflict,
-
-        "vote_preferred_scale":
-            alignment[
-                "vote_preferred_scale"
-            ],
-
-        "cross_model_median_optimum_scale":
-            alignment[
-                "cross_model_median_optimum_scale"
-            ],
 
         "reasons":
             reasons,

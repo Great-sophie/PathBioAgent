@@ -2,6 +2,10 @@ from typing import Any, Dict, List
 
 from pathbioagent.state import BiomarkerAgentState
 
+from pathbioagent.llm import (
+    interpret_query,
+)
+
 from pathbioagent.tools.program_evidence import (
     infer_target_scale,
     infer_ranking_intent,
@@ -12,20 +16,28 @@ from pathbioagent.tools.program_evidence import (
 
 
 # ============================================================
-# 1. Parse query
+# 0. Resolve query context
 # ============================================================
 
-def parse_query(
+def _resolve_query_context(
     state: BiomarkerAgentState,
-) -> Dict[str, Any]:
+):
     """
-    Parse the user query into:
-        - target magnification
-        - ranking intent
-        - coarse task type
+    Resolve target scale, ranking intent, and entity.
 
-    Scientific ranking itself remains deterministic
-    inside program_evidence.py.
+    Priority
+    --------
+    1. structured_query produced by the LLM interpreter
+       or deterministic fallback.
+    2. legacy deterministic parsing of the raw query.
+
+    Important
+    ---------
+    target_scale=None inside structured_query is meaningful.
+    It means that the interpreter intentionally found no
+    requested magnification.
+
+    Therefore None must not trigger raw-query re-parsing.
     """
 
     query = state.get(
@@ -33,20 +45,193 @@ def parse_query(
         "",
     )
 
-    target_scale = infer_target_scale(
-        query
+    structured_query = state.get(
+        "structured_query"
     )
 
-    ranking_intent = infer_ranking_intent(
-        query
+    # --------------------------------------------------------
+    # Structured interpretation exists
+    # --------------------------------------------------------
+
+    if structured_query:
+
+        ranking_intent = (
+            structured_query.get(
+                "intent"
+            )
+        )
+
+        # Explicit None is valid.
+        if (
+            "target_scale"
+            in structured_query
+        ):
+
+            target_scale = (
+                structured_query[
+                    "target_scale"
+                ]
+            )
+
+        else:
+
+            target_scale = (
+                infer_target_scale(
+                    query
+                )
+            )
+
+        entity = (
+            structured_query.get(
+                "entity",
+                "molecular_program",
+            )
+        )
+
+        # Defensive backward compatibility
+        if ranking_intent is None:
+
+            ranking_intent = (
+                infer_ranking_intent(
+                    query
+                )
+            )
+
+        return (
+            target_scale,
+            ranking_intent,
+            entity,
+        )
+
+    # --------------------------------------------------------
+    # Legacy deterministic path
+    # --------------------------------------------------------
+
+    return (
+        infer_target_scale(
+            query
+        ),
+        infer_ranking_intent(
+            query
+        ),
+        "molecular_program",
+    )
+
+
+# ============================================================
+# 1. Interpret natural-language query
+# ============================================================
+
+def interpret_query_node(
+    state: BiomarkerAgentState,
+) -> Dict[str, Any]:
+    """
+    Convert the user's natural-language question into a
+    validated structured scientific query.
+
+    The interpreter may use an LLM.
+
+    If an LLM cannot be used, interpret_query() falls back
+    to the deterministic parser.
+
+    This node performs language interpretation only.
+
+    It does NOT:
+        - calculate scientific evidence;
+        - modify correlations;
+        - alter robustness metrics;
+        - determine statistical significance;
+        - decide whether a hypothesis is supported.
+    """
+
+    query = state.get(
+        "query",
+        "",
+    )
+
+    interpretation = (
+        interpret_query(
+            query
+        )
+    )
+
+    structured_query = (
+        interpretation.model_dump()
+    )
+
+    trace = list(
+        state.get(
+            "trace",
+            [],
+        )
+    )
+
+    trace.append(
+        "Query interpretation -> "
+        f"intent="
+        f"{structured_query.get('intent')}, "
+        f"target_scale="
+        f"{structured_query.get('target_scale')}, "
+        f"entity="
+        f"{structured_query.get('entity')}, "
+        f"source="
+        f"{structured_query.get('parser_source')}, "
+        f"confidence="
+        f"{structured_query.get('confidence')}"
+    )
+
+    if (
+        structured_query.get(
+            "explicit_scale_guard_applied",
+            False,
+        )
+    ):
+
+        trace.append(
+            "Explicit scale guard applied: "
+            "literal user magnification was preserved"
+        )
+
+    return {
+        "structured_query":
+            structured_query,
+
+        "trace":
+            trace,
+    }
+
+
+# ============================================================
+# 2. Parse structured query into workflow task
+# ============================================================
+
+def parse_query(
+    state: BiomarkerAgentState,
+) -> Dict[str, Any]:
+    """
+    Convert the validated query interpretation into
+    workflow-level task metadata.
+
+    Scientific candidate ranking remains deterministic.
+    """
+
+    (
+        target_scale,
+        ranking_intent,
+        entity,
+    ) = _resolve_query_context(
+        state
     )
 
     if target_scale is not None:
+
         task_type = (
             f"{ranking_intent}_"
             f"scale_specific_program_search"
         )
+
     else:
+
         task_type = (
             f"{ranking_intent}_"
             f"program_search"
@@ -60,10 +245,11 @@ def parse_query(
     )
 
     trace.append(
-        "Parsed query -> "
+        "Parsed structured query -> "
         f"task_type={task_type}, "
         f"target_scale={target_scale}, "
-        f"ranking_intent={ranking_intent}"
+        f"ranking_intent={ranking_intent}, "
+        f"entity={entity}"
     )
 
     return {
@@ -100,15 +286,19 @@ def parse_query(
 
 
 # ============================================================
-# 2. Search candidates
+# 3. Search candidates
 # ============================================================
 
 def search_candidates(
     state: BiomarkerAgentState,
 ) -> Dict[str, Any]:
     """
-    Search and rank real molecular-program candidates
-    according to the query intent.
+    Search and rank real molecular-program candidates.
+
+    The language interpretation comes from structured_query.
+
+    Candidate ranking itself remains deterministic in
+    program_evidence.py.
     """
 
     query = state.get(
@@ -116,8 +306,20 @@ def search_candidates(
         "",
     )
 
-    candidates = search_program_candidates(
-        query
+    (
+        target_scale,
+        ranking_intent,
+        entity,
+    ) = _resolve_query_context(
+        state
+    )
+
+    candidates = (
+        search_program_candidates(
+            query,
+            ranking_intent=ranking_intent,
+            target_scale=target_scale,
+        )
     )
 
     trace = list(
@@ -128,11 +330,15 @@ def search_candidates(
     )
 
     trace.append(
-        "Real-data candidate search "
-        f"returned {len(candidates)} programs"
+        "Real-data candidate search -> "
+        f"intent={ranking_intent}, "
+        f"target_scale={target_scale}, "
+        f"entity={entity}, "
+        f"returned={len(candidates)}"
     )
 
     if len(candidates) == 0:
+
         trace.append(
             "No program satisfied the "
             "query-specific candidate criteria"
@@ -148,15 +354,15 @@ def search_candidates(
 
 
 # ============================================================
-# 3. Select next candidate
+# 4. Select next candidate
 # ============================================================
 
 def select_candidate(
     state: BiomarkerAgentState,
 ) -> Dict[str, Any]:
     """
-    Select the first candidate that has not yet
-    been evaluated.
+    Select the first candidate that has not yet been
+    evaluated.
     """
 
     queue = state.get(
@@ -208,15 +414,15 @@ def select_candidate(
 
 
 # ============================================================
-# 4. Collect real evidence
+# 5. Collect real evidence
 # ============================================================
 
 def test_candidate(
     state: BiomarkerAgentState,
 ) -> Dict[str, Any]:
     """
-    Collect deterministic real-data evidence
-    for the current molecular program.
+    Collect deterministic real-data evidence for the current
+    molecular program.
     """
 
     candidate = state.get(
@@ -267,6 +473,7 @@ def test_candidate(
     )
 
     if candidate not in tested:
+
         tested.append(
             candidate
         )
@@ -279,29 +486,32 @@ def test_candidate(
         + 1
     )
 
-    consensus = candidate_evidence[
-        "consensus"
-    ]
+    consensus = candidate_evidence.get(
+        "consensus",
+        {},
+    )
 
-    alignment = candidate_evidence[
-        "evidence_alignment"
-    ]
+    alignment = candidate_evidence.get(
+        "evidence_alignment",
+        {},
+    )
 
-    robustness = candidate_evidence[
-        "robustness"
-    ]
+    robustness = candidate_evidence.get(
+        "robustness",
+        {},
+    )
 
     trace.append(
         "Collected real evidence for "
         f"{candidate}: "
         f"vote_preferred_scale="
-        f"{consensus['preferred_scale']}, "
+        f"{consensus.get('preferred_scale')}, "
         f"agreement="
-        f"{consensus['max_models_agree']}/8, "
+        f"{consensus.get('max_models_agree')}/8, "
         f"median_optimum="
-        f"{alignment['cross_model_median_optimum_scale']}, "
+        f"{alignment.get('cross_model_median_optimum_scale')}, "
         f"conflict="
-        f"{alignment['conflict']}, "
+        f"{alignment.get('conflict')}, "
         f"robustness_available="
         f"{robustness.get('available')}"
     )
@@ -322,7 +532,7 @@ def test_candidate(
 
 
 # ============================================================
-# 5. Normalize support status
+# 6. Normalize support status
 # ============================================================
 
 def _normalize_support_status(
@@ -332,11 +542,17 @@ def _normalize_support_status(
     Keep hypothesis support status separate from
     evidence-quality flags.
 
-    Backward compatibility:
-    if evaluate_program_evidence() still returns
-    'conflicting_evidence' as a raw status, map it to
-    supported_exploratory_hypothesis when all underlying
-    support gates passed. Conflict remains an independent flag.
+    Backward compatibility
+    ----------------------
+    If evaluate_program_evidence() returns the historical raw
+    status:
+
+        conflicting_evidence
+
+    map it into a primary support status.
+
+    Conflict remains an independent evidence-quality
+    diagnostic.
     """
 
     raw_status = decision.get(
@@ -345,6 +561,7 @@ def _normalize_support_status(
     )
 
     if raw_status != "conflicting_evidence":
+
         return raw_status
 
     basic_support = (
@@ -374,7 +591,7 @@ def _normalize_support_status(
 
 
 # ============================================================
-# 6. Evidence gate
+# 7. Evidence gate
 # ============================================================
 
 def evidence_gate(
@@ -383,8 +600,11 @@ def evidence_gate(
     """
     Apply deterministic scientific evidence rules.
 
-    Primary decision status and evidence-quality flags
+    Primary support status and evidence-quality diagnostics
     are stored separately.
+
+    The target magnification is taken from structured_query
+    when available.
     """
 
     candidate = state.get(
@@ -413,13 +633,12 @@ def evidence_gate(
                 trace,
         }
 
-    query = state.get(
-        "query",
-        "",
-    )
-
-    target_scale = infer_target_scale(
-        query
+    (
+        target_scale,
+        _ranking_intent,
+        _entity,
+    ) = _resolve_query_context(
+        state
     )
 
     all_evidence = dict(
@@ -533,7 +752,7 @@ def evidence_gate(
 
 
 # ============================================================
-# 7. Build evidence flags
+# 8. Build evidence-quality flags
 # ============================================================
 
 def _build_evidence_flags(
@@ -542,8 +761,8 @@ def _build_evidence_flags(
     """
     Build orthogonal evidence-quality flags.
 
-    These are diagnostics, not mutually exclusive
-    hypothesis statuses.
+    These diagnostics are not mutually exclusive with the
+    primary support status.
     """
 
     consensus = item.get(
@@ -648,7 +867,7 @@ def _build_evidence_flags(
 
 
 # ============================================================
-# 8. Build evidence card
+# 9. Build Evidence Card
 # ============================================================
 
 def _build_evidence_card(
@@ -656,8 +875,8 @@ def _build_evidence_card(
     item: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Create an auditable Evidence Card for one
-    molecular program.
+    Create an auditable Evidence Card for one molecular
+    program.
     """
 
     decision = item.get(
@@ -749,6 +968,11 @@ def _build_evidence_card(
                 "coverage_fraction"
             ),
 
+        "eligible_main":
+            consensus.get(
+                "eligible_main"
+            ),
+
         # ====================================================
         # Cross-model visibility
         # ====================================================
@@ -795,7 +1019,7 @@ def _build_evidence_card(
             ),
 
         # ====================================================
-        # Robustness
+        # Robustness summary
         # ====================================================
 
         "robustness_available":
@@ -813,13 +1037,23 @@ def _build_evidence_card(
                 "median_vote_margin"
             ),
 
+        "compatible_exclusions":
+            robustness.get(
+                "compatible_exclusions"
+            ),
+
+        "n_exclusions":
+            robustness.get(
+                "n_exclusions"
+            ),
+
         "median_optimum_stability_fraction":
             robustness.get(
                 "median_optimum_stability_fraction"
             ),
 
         # ====================================================
-        # Leave-one-model-out
+        # Leave-one-model-out evidence
         # ====================================================
 
         "lomo_available":
@@ -842,8 +1076,18 @@ def _build_evidence_card(
                 "compatibility_fraction"
             ),
 
+        "lomo_minimum_vote_margin":
+            lomo.get(
+                "minimum_vote_margin"
+            ),
+
+        "lomo_median_vote_margin":
+            lomo.get(
+                "median_vote_margin"
+            ),
+
         # ====================================================
-        # Gate diagnostics
+        # Gate components
         # ====================================================
 
         "consensus_ok":
@@ -862,7 +1106,7 @@ def _build_evidence_card(
             ),
 
         # ====================================================
-        # Independent evidence flags
+        # Independent diagnostics
         # ====================================================
 
         "evidence_flags":
@@ -881,7 +1125,7 @@ def _build_evidence_card(
 
 
 # ============================================================
-# 9. Build final report
+# 10. Build final report
 # ============================================================
 
 def build_report(
@@ -890,13 +1134,14 @@ def build_report(
     """
     Build the final scientific evidence report.
 
-    Important design rule:
+    Important design rule
+    ---------------------
 
-        hypothesis status
+        hypothesis support status
             !=
         evidence-quality flags
 
-    Therefore a program may simultaneously be:
+    Therefore, for example, a program may simultaneously be:
 
         status = not_supported
         aggregation_conflict = True
@@ -909,12 +1154,17 @@ def build_report(
         "",
     )
 
-    target_scale = infer_target_scale(
-        query
+    (
+        target_scale,
+        ranking_intent,
+        entity,
+    ) = _resolve_query_context(
+        state
     )
 
-    ranking_intent = infer_ranking_intent(
-        query
+    structured_query = state.get(
+        "structured_query",
+        {},
     )
 
     evidence = state.get(
@@ -924,6 +1174,11 @@ def build_report(
 
     tested_candidates = state.get(
         "tested_candidates",
+        [],
+    )
+
+    candidate_queue = state.get(
+        "candidate_queue",
         [],
     )
 
@@ -955,8 +1210,12 @@ def build_report(
 
     missing_robustness_programs: List[str] = []
 
+    missing_lomo_programs: List[str] = []
+
+    weak_consensus_programs: List[str] = []
+
     # ========================================================
-    # Evidence cards
+    # Evidence Cards
     # ========================================================
 
     evidence_cards: List[
@@ -982,13 +1241,15 @@ def build_report(
             card
         )
 
-        status = card[
-            "status"
-        ]
+        status = card.get(
+            "status",
+            "unknown",
+        )
 
-        flags = card[
-            "evidence_flags"
-        ]
+        flags = card.get(
+            "evidence_flags",
+            {},
+        )
 
         # ====================================================
         # Primary status classification
@@ -1041,86 +1302,156 @@ def build_report(
             )
 
         # ====================================================
-        # Independent evidence flags
+        # Diagnostic classifications
         # ====================================================
 
-        if flags[
-            "aggregation_conflict"
-        ]:
+        if flags.get(
+            "aggregation_conflict",
+            False,
+        ):
 
             conflict_programs.append(
                 program
             )
 
-        if flags[
-            "tie_consensus"
-        ]:
+        if flags.get(
+            "tie_consensus",
+            False,
+        ):
 
             tie_programs.append(
                 program
             )
 
-        if flags[
-            "low_optimum_stability"
-        ]:
+        if flags.get(
+            "low_optimum_stability",
+            False,
+        ):
 
             low_stability_programs.append(
                 program
             )
 
-        if flags[
-            "low_lomo_compatibility"
-        ]:
+        if flags.get(
+            "low_lomo_compatibility",
+            False,
+        ):
 
             low_lomo_programs.append(
                 program
             )
 
-        if flags[
-            "missing_robustness"
-        ]:
+        if flags.get(
+            "missing_robustness",
+            False,
+        ):
 
             missing_robustness_programs.append(
                 program
             )
 
+        if flags.get(
+            "missing_lomo",
+            False,
+        ):
+
+            missing_lomo_programs.append(
+                program
+            )
+
+        if flags.get(
+            "weak_model_consensus",
+            False,
+        ):
+
+            weak_consensus_programs.append(
+                program
+            )
+
     # ========================================================
-    # Final structured report
+    # Interpretation scope
     # ========================================================
 
-    report = {
+    interpretation_scope = (
+        "Primary statuses describe support for exploratory "
+        "morphology-molecular scale hypotheses in the "
+        "available dataset. Evidence-quality flags are "
+        "independent diagnostics and may coexist with any "
+        "primary status. These results do not establish "
+        "clinical biomarker validity, biological causality, "
+        "or patient-level molecular diagnosis."
+    )
+
+    # ========================================================
+    # Final report object
+    # ========================================================
+
+    final_report = {
         # ----------------------------------------------------
-        # Query interpretation
+        # Query metadata
         # ----------------------------------------------------
 
         "query":
             query,
 
-        "target_scale":
-            target_scale,
+        "task_type":
+            state.get(
+                "task_type"
+            ),
 
         "ranking_intent":
             ranking_intent,
 
-        # ----------------------------------------------------
-        # Execution
-        # ----------------------------------------------------
+        "target_scale":
+            target_scale,
 
-        "n_candidates":
-            len(
-                state.get(
-                    "candidate_queue",
-                    [],
-                )
+        "entity":
+            entity,
+
+        "structured_query":
+            structured_query,
+
+        "parser_source":
+            structured_query.get(
+                "parser_source"
             ),
 
-        "n_tested":
+        "query_confidence":
+            structured_query.get(
+                "confidence"
+            ),
+
+        "model_name":
+            structured_query.get(
+                "model_name"
+            ),
+
+        # ----------------------------------------------------
+        # Candidate accounting
+        # ----------------------------------------------------
+
+        "candidates_tested":
             len(
                 tested_candidates
             ),
 
+        "total_candidates":
+            len(
+                candidate_queue
+            ),
+
+        "tested_candidates":
+            list(
+                tested_candidates
+            ),
+
+        "candidate_queue":
+            list(
+                candidate_queue
+            ),
+
         # ----------------------------------------------------
-        # Primary scientific decisions
+        # Primary decisions
         # ----------------------------------------------------
 
         "supported_exploratory_hypotheses":
@@ -1138,8 +1469,15 @@ def build_report(
         "unknown_status":
             unknown,
 
+        # Compatibility aliases
+        "supported":
+            supported,
+
+        "insufficient":
+            insufficient,
+
         # ----------------------------------------------------
-        # Independent evidence diagnostics
+        # Evidence diagnostics
         # ----------------------------------------------------
 
         "evidence_conflict_programs":
@@ -1157,33 +1495,33 @@ def build_report(
         "missing_robustness_programs":
             missing_robustness_programs,
 
+        "missing_lomo_programs":
+            missing_lomo_programs,
+
+        "weak_model_consensus_programs":
+            weak_consensus_programs,
+
+        # Compatibility aliases
+        "aggregation_conflict":
+            conflict_programs,
+
+        "tie_consensus":
+            tie_programs,
+
         # ----------------------------------------------------
-        # Auditable evidence cards
+        # Evidence Cards
         # ----------------------------------------------------
 
         "evidence_cards":
             evidence_cards,
 
         # ----------------------------------------------------
-        # Interpretation boundary
+        # Scientific scope
         # ----------------------------------------------------
 
-        "interpretation_scope": (
-            "Primary statuses describe support for "
-            "exploratory morphology-molecular scale "
-            "hypotheses in the available dataset. "
-            "Evidence-quality flags are independent "
-            "diagnostics and may coexist with any "
-            "primary status. "
-            "These results do not establish clinical "
-            "biomarker validity, biological causality, "
-            "or patient-level molecular diagnosis."
-        ),
+        "interpretation_scope":
+            interpretation_scope,
     }
-
-    # ========================================================
-    # Trace
-    # ========================================================
 
     trace = list(
         state.get(
@@ -1193,7 +1531,9 @@ def build_report(
     )
 
     trace.append(
-        "Built final real-data evidence report: "
+        "Built final report -> "
+        f"tested={len(tested_candidates)}/"
+        f"{len(candidate_queue)}, "
         f"supported={len(supported)}, "
         f"not_supported={len(not_supported)}, "
         f"insufficient={len(insufficient)}, "
@@ -1202,7 +1542,7 @@ def build_report(
 
     return {
         "final_report":
-            report,
+            final_report,
 
         "trace":
             trace,
