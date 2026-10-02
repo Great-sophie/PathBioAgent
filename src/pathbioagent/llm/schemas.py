@@ -12,6 +12,7 @@ QueryIntent = Literal[
     "robustness",
     "discovery",
     "gene_explanation",
+    "biological_pattern",
     "general",
 ]
 
@@ -52,7 +53,8 @@ class LLMStructuredQuery(BaseModel):
         description=(
             "Scientific query intent: "
             "preference, visibility, robustness, "
-            "discovery, or general."
+            "discovery, gene_explanation, "
+            "biological_pattern, or general."
         )
     )
 

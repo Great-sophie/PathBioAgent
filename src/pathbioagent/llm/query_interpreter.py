@@ -226,6 +226,46 @@ def deterministic_interpret_query(
         )
 
 
+    # --------------------------------------------------------
+    # Biological-pattern evidence layer
+    #
+    # This must be resolved before legacy ranking intents
+    # such as visibility, robustness, and preference.
+    # --------------------------------------------------------
+
+    if _is_biological_pattern_query(
+        query
+    ):
+
+        return QueryInterpretation(
+
+            intent=
+                "biological_pattern",
+
+            target_scale=
+                infer_target_scale(
+                    query
+                ),
+
+            entity=
+                "molecular_program",
+
+            confidence=
+                1.0,
+
+            parser_source=
+                "deterministic_fallback",
+
+            model_name=
+                None,
+
+            explicit_scale_guard_applied=
+                False,
+
+        )
+
+
+    # Preserve all existing routing behavior.
     return _deterministic_fallback(
         query
     )
@@ -388,6 +428,252 @@ def _is_discovery_query(
         term in q
         for term in terms
     )
+
+
+
+# ============================================================
+# Biological-pattern intent guard
+# ============================================================
+
+
+def _is_biological_pattern_query(
+    query: str,
+) -> bool:
+    """
+    Detect questions about biological characteristics,
+    pathway enrichment, or molecular interpretation of
+    cross-scale visibility-pattern clusters.
+
+    This intent is distinct from:
+        - discovery
+        - gene_explanation
+        - preference
+        - visibility
+        - robustness
+
+    The detector identifies the evidence layer only.
+    It does not infer biological conclusions.
+    """
+
+    q = (
+        query
+        .lower()
+        .replace("×", "x")
+    )
+
+    q = re.sub(
+        r"\s+",
+        " ",
+        q,
+    ).strip()
+
+
+    # --------------------------------------------------------
+    # Explicit cluster language
+    # --------------------------------------------------------
+
+    cluster_reference = bool(
+        re.search(
+            r"\b(?:fine\s+)?clusters?\b",
+            q,
+        )
+    )
+
+
+    # --------------------------------------------------------
+    # Explicit visibility-pattern language
+    # --------------------------------------------------------
+
+    visibility_pattern_reference = (
+        "visibility pattern"
+        in q
+    )
+
+
+    # --------------------------------------------------------
+    # Known descriptive visibility phenotypes
+    # --------------------------------------------------------
+
+    pattern_descriptor = any(
+        term in q
+        for term in (
+            "scale-stable",
+            "scale stable",
+            "scale-flat",
+            "scale flat",
+            "high-visibility",
+            "high visibility",
+            "low-visibility",
+            "low visibility",
+            "high-magnification",
+            "high magnification",
+        )
+    )
+
+
+    if re.search(
+        r"\b(?:2(?:\.|p)5|10|40)\s*x"
+        r"\s*[- ]?(?:enhanced|peaked)\b",
+        q,
+    ):
+
+        pattern_descriptor = True
+
+
+    # --------------------------------------------------------
+    # Biological / molecular interpretation language
+    # --------------------------------------------------------
+
+    biological_language = any(
+        term in q
+        for term in (
+            "biology",
+            "biological",
+            "biologically",
+            "pathway",
+            "pathways",
+            "molecular program",
+            "molecular programs",
+            "biological program",
+            "biological programs",
+            "biological process",
+            "biological processes",
+            "molecular characteristic",
+            "molecular characteristics",
+            "biological evidence",
+            "biological interpretation",
+        )
+    )
+
+
+    # --------------------------------------------------------
+    # Relationship / enrichment language
+    # --------------------------------------------------------
+
+    relation_language = any(
+        term in q
+        for term in (
+            "associated with",
+            "association with",
+            "enriched",
+            "enrichment",
+            "characterize",
+            "characterizes",
+            "characterise",
+            "characterises",
+            "define",
+            "defines",
+            "distinguish",
+            "distinguishes",
+            "support",
+        )
+    )
+
+
+    comparison_language = any(
+        term in q
+        for term in (
+            "compare",
+            "comparison",
+            " versus ",
+            " vs ",
+        )
+    )
+
+
+    preference_language = any(
+        term in q
+        for term in (
+            "prefer",
+            "prefers",
+            "preferred",
+            "preferring",
+            "preference",
+        )
+    )
+
+
+    explicit_scale = (
+        infer_target_scale(
+            query
+        )
+        is not None
+    )
+
+
+    # --------------------------------------------------------
+    # Rule 1
+    #
+    # Explicit visibility-pattern questions.
+    # --------------------------------------------------------
+
+    if visibility_pattern_reference:
+
+        return True
+
+
+    # --------------------------------------------------------
+    # Rule 2
+    #
+    # Cluster-level biological / enrichment / comparison
+    # questions.
+    # --------------------------------------------------------
+
+    if cluster_reference:
+
+        if (
+            biological_language
+            or relation_language
+            or comparison_language
+        ):
+
+            return True
+
+
+        # Example:
+        # Which clusters prefer 40x?
+        if (
+            explicit_scale
+            and preference_language
+        ):
+
+            return True
+
+
+    # --------------------------------------------------------
+    # Rule 3
+    #
+    # Named visibility phenotype + biological question.
+    # --------------------------------------------------------
+
+    if (
+        pattern_descriptor
+        and (
+            biological_language
+            or relation_language
+            or comparison_language
+        )
+    ):
+
+        return True
+
+
+    # --------------------------------------------------------
+    # Rule 4
+    #
+    # Biology of genes preferring a specified scale.
+    # --------------------------------------------------------
+
+    if (
+        biological_language
+        and explicit_scale
+        and preference_language
+    ):
+
+        return True
+
+
+    return False
 
 
 # ============================================================
@@ -570,6 +856,24 @@ def interpret_query(
 
         raise ValueError(
             "query cannot be empty"
+        )
+
+
+    # --------------------------------------------------------
+    # Deterministic biological-pattern routing
+    # --------------------------------------------------------
+    # Biological-pattern queries map to a deterministic
+    # evidence layer. Do not allow the LLM to reinterpret
+    # them as discovery, visibility, robustness, preference,
+    # or general.
+    # --------------------------------------------------------
+
+    if _is_biological_pattern_query(
+        query
+    ):
+
+        return deterministic_interpret_query(
+            query
         )
 
 
