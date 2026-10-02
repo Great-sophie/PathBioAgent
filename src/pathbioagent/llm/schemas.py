@@ -6,13 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field
 # ============================================================
 # Allowed structured query values
 # ============================================================
-
 QueryIntent = Literal[
     "preference",
     "visibility",
     "robustness",
+    "discovery",
     "general",
 ]
+
 
 TargetScale = Literal[
     "2p5x",
@@ -48,9 +49,9 @@ class LLMStructuredQuery(BaseModel):
 
     intent: QueryIntent = Field(
         description=(
-            "Scientific ranking intent: "
+            "Scientific query intent: "
             "preference, visibility, robustness, "
-            "or general."
+            "discovery, or general."
         )
     )
 

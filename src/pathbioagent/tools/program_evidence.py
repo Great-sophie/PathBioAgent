@@ -333,6 +333,34 @@ def infer_ranking_intent(
 
     text = query.lower()
 
+
+    # --------------------------------------------------------
+    # Discovery
+    # --------------------------------------------------------
+    # Questions asking what factors explain
+    # morphology-derived molecular visibility.
+    # --------------------------------------------------------
+
+    discovery_terms = (
+        "what determines",
+        "what explains",
+        "which factors",
+        "associated with",
+        "gene properties",
+        "predict molecular visibility",
+        "why are genes visible",
+        "patterns across genes",
+        "molecular visibility factors",
+    )
+
+
+    if any(
+        term in text
+        for term in discovery_terms
+    ):
+        return "discovery"
+
+
     # --------------------------------------------------------
     # Robustness
     # --------------------------------------------------------
