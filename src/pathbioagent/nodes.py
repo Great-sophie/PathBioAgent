@@ -16,6 +16,12 @@ from pathbioagent.tools.cluster_biological_query import (
     resolve_biological_pattern_query,
 )
 
+
+from pathbioagent.tools.cluster_biological_comparison import (
+    compare_cluster_biology,
+)
+
+
 from pathbioagent.tools.gene_explanation import (
     explain_gene,
 )
@@ -408,6 +414,43 @@ def biological_pattern_evidence_node(
         "biological_pattern_evidence":
             evidence,
     }
+
+
+
+def cluster_comparison_node(
+    state: BiomarkerAgentState,
+):
+
+    import re
+
+
+    query = state.get(
+        "query",
+        "",
+    )
+
+
+    clusters = re.findall(
+        r"cluster\s+(\d+)",
+        query.lower(),
+    )
+
+
+    if len(clusters) < 2:
+        return {}
+
+
+    result = compare_cluster_biology(
+        int(clusters[0]),
+        int(clusters[1]),
+    )
+
+
+    return {
+        "cluster_comparison_evidence":
+            result,
+    }
+
 
 
 

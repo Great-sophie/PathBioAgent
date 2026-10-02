@@ -233,6 +233,39 @@ def deterministic_interpret_query(
     # such as visibility, robustness, and preference.
     # --------------------------------------------------------
 
+    if _is_cluster_comparison_query(
+        query
+    ):
+
+        return QueryInterpretation(
+
+            intent=
+                "cluster_comparison",
+
+            target_scale=
+                infer_target_scale(
+                    query
+                ),
+
+            entity=
+                "molecular_program",
+
+            confidence=
+                1.0,
+
+            parser_source=
+                "deterministic_fallback",
+
+            model_name=
+                None,
+
+            explicit_scale_guard_applied=
+                False,
+
+        )
+
+
+
     if _is_biological_pattern_query(
         query
     ):
@@ -676,11 +709,43 @@ def _is_biological_pattern_query(
     return False
 
 
-# ============================================================
-# LLM builder
-# ============================================================
+def _is_cluster_comparison_query(
+    query: str,
+) -> bool:
+    """
+    Detect explicit cluster-to-cluster comparison.
+
+    Requires numbered cluster identifiers:
+        cluster 3 vs cluster 5
+        compare cluster 2 and cluster 4
+    """
+
+    q = query.lower()
 
 
+    comparison_terms = (
+        "compare",
+        "comparison",
+        "difference between",
+        "versus",
+        " vs ",
+    )
+
+
+    explicit_cluster_ids = re.findall(
+        r"\bcluster\s+\d+\b",
+        q,
+    )
+
+
+    return (
+        len(explicit_cluster_ids) >= 2
+        and
+        any(
+            term in q
+            for term in comparison_terms
+        )
+    )
 def _build_structured_llm(
     model_name
 ):
@@ -1001,7 +1066,12 @@ def interpret_query(
 
 
 
-        if _is_discovery_query(
+        if _is_cluster_comparison_query(
+            query
+        ):
+            final_intent = "cluster_comparison"
+
+        elif _is_discovery_query(
             query
         ):
             final_intent = "discovery"

@@ -117,12 +117,7 @@ def _ranking_intent(
             "Compare the biology of the "
             "scale-stable and 2.5x-enhanced "
             "clusters."
-        ),
-        (
-            "Compare cluster 2 and cluster 5 "
-            "biologically."
-        ),
-        (
+        ),        (
             "What molecular programs are "
             "enriched in the 40x-enhanced "
             "visibility pattern?"

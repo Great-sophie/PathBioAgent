@@ -14,8 +14,10 @@ from pathbioagent.nodes import (
     build_report,
     discovery_evidence_node,
     gene_explanation_node,
+    cluster_comparison_node,
     biological_pattern_evidence_node,
 )
+
 
 
 
@@ -26,11 +28,12 @@ def route_after_interpret_query(
     "discovery_evidence",
     "gene_explanation",
     "biological_pattern_evidence",
+    "cluster_comparison",
     "parse_query",
 ]:
     """
-    Route discovery queries directly to
-    molecular visibility discovery analysis.
+    Route query interpretation results
+    to scientific evidence modules.
     """
 
     structured = state.get(
@@ -41,6 +44,10 @@ def route_after_interpret_query(
     intent = structured.get(
         "intent"
     )
+
+
+    if intent == "cluster_comparison":
+        return "cluster_comparison"
 
 
     if intent == "gene_explanation":
@@ -169,6 +176,11 @@ def build_graph():
         gene_explanation_node,
     )
 
+    builder.add_node(
+        "cluster_comparison",
+        cluster_comparison_node,
+    )
+
 
     builder.add_node(
         "biological_pattern_evidence",
@@ -194,6 +206,9 @@ def build_graph():
             "biological_pattern_evidence":
                 "biological_pattern_evidence",
 
+            "cluster_comparison":
+                "cluster_comparison",
+
             "parse_query":
                 "parse_query",
         },
@@ -213,6 +228,12 @@ def build_graph():
 
     builder.add_edge(
         "biological_pattern_evidence",
+        "build_report",
+    )
+
+
+    builder.add_edge(
+        "cluster_comparison",
         "build_report",
     )
 

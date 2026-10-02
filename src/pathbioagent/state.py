@@ -62,6 +62,13 @@ class BiomarkerAgentState(TypedDict, total=False):
 
 
     # ========================================================
+    # Cluster biological comparison evidence
+    # ========================================================
+
+    cluster_comparison_evidence: Dict[str, Any]
+
+
+    # ========================================================
     # Gene-level scientific reasoning
     # ========================================================
 
