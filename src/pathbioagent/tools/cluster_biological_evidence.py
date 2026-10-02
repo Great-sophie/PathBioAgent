@@ -883,16 +883,26 @@ def build_evidence_confidence(
         )
 
 
-    programs = evidence.get(
-        "biological_programs",
-        {}
-    )
-
+    # --------------------------------------------------------
+    # Pathway enrichment evidence
+    # --------------------------------------------------------
 
     if (
-        programs.get("hallmark")
+        evidence.get(
+            "significant_hallmark_terms"
+        )
         or
-        programs.get("go_reactome")
+        evidence.get(
+            "significant_go_reactome_terms"
+        )
+        or
+        evidence.get(
+            "top_hallmark_term"
+        )
+        or
+        evidence.get(
+            "top_go_reactome_term"
+        )
     ):
 
         supporting.append(
@@ -900,8 +910,24 @@ def build_evidence_confidence(
         )
 
 
-    if evidence.get(
-        "rna"
+    # --------------------------------------------------------
+    # RNA characterization evidence
+    # --------------------------------------------------------
+
+    if (
+        evidence.get(
+            "rna_mean_expression_median"
+        )
+        is not None
+        or
+        evidence.get(
+            "rna_tau_specificity_relative"
+        )
+        is not None
+        or
+        evidence.get(
+            "rna_expression_relative"
+        )
     ):
 
         supporting.append(
