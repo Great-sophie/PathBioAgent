@@ -11,6 +11,11 @@ from pathbioagent.tools.gene_reasoning import (
     build_gene_reasoning,
 )
 
+
+from pathbioagent.tools.cluster_biological_query import (
+    resolve_biological_pattern_query,
+)
+
 from pathbioagent.tools.gene_explanation import (
     explain_gene,
 )
@@ -356,6 +361,54 @@ def gene_explanation_node(
         "gene_reasoning":
             reasoning,
     }
+
+
+
+def biological_pattern_evidence_node(
+    state: BiomarkerAgentState,
+) -> Dict[str, Any]:
+    """
+    Retrieve biological evidence for
+    morphology-derived visibility patterns.
+
+    Handles:
+        - cluster biology
+        - scale-associated patterns
+        - molecular program associations
+    """
+
+    (
+        target_scale,
+        ranking_intent,
+        entity,
+    ) = _resolve_query_context(
+        state
+    )
+
+
+    if ranking_intent != "biological_pattern":
+
+        return {}
+
+
+    query = state.get(
+        "query",
+        "",
+    )
+
+
+    evidence = (
+        resolve_biological_pattern_query(
+            query
+        )
+    )
+
+
+    return {
+        "biological_pattern_evidence":
+            evidence,
+    }
+
 
 
 def interpret_query_node(
@@ -2330,6 +2383,32 @@ def build_report(
             "The primary question concerns stability of preferred-scale "
             "evidence across model exclusions and aggregation choices."
         )
+
+    elif ranking_intent == "biological_pattern":
+
+        primary_answer_type = (
+            "biological_pattern_evidence"
+        )
+
+        query_semantics = (
+            "The query concerns biological interpretation "
+            "of morphology-derived visibility patterns, "
+            "including cluster-level molecular programs "
+            "and pathway-associated evidence."
+        )
+    elif ranking_intent == "biological_pattern":
+
+        primary_answer_type = (
+            "biological_pattern_evidence"
+        )
+
+        query_semantics = (
+            "The query concerns biological interpretation "
+            "of morphology-derived visibility patterns, "
+            "including cluster-level molecular programs "
+            "and pathway-associated evidence."
+        )
+
     else:
         primary_answer_type = "scale_hypothesis_support"
         query_semantics = (
@@ -2367,6 +2446,11 @@ def build_report(
         "gene_explanation":
             state.get(
                 "gene_explanation"
+            ),
+
+        "biological_pattern_evidence":
+            state.get(
+                "biological_pattern_evidence"
             ),
 
         "gene_reasoning":

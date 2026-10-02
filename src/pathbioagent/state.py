@@ -55,6 +55,13 @@ class BiomarkerAgentState(TypedDict, total=False):
     gene_explanation: Dict[str, Any]
 
     # ========================================================
+    # Biological pattern evidence
+    # ========================================================
+
+    biological_pattern_evidence: Dict[str, Any]
+
+
+    # ========================================================
     # Gene-level scientific reasoning
     # ========================================================
 
@@ -80,8 +87,6 @@ class BiomarkerAgentState(TypedDict, total=False):
     # ========================================================
     # Audit trace
     # ========================================================
-
-    discovery_evidence: dict
 
     trace: List[str]
 

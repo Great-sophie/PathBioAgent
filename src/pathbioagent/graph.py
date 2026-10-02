@@ -14,6 +14,7 @@ from pathbioagent.nodes import (
     build_report,
     discovery_evidence_node,
     gene_explanation_node,
+    biological_pattern_evidence_node,
 )
 
 
@@ -24,6 +25,7 @@ def route_after_interpret_query(
 ) -> Literal[
     "discovery_evidence",
     "gene_explanation",
+    "biological_pattern_evidence",
     "parse_query",
 ]:
     """
@@ -41,12 +43,16 @@ def route_after_interpret_query(
     )
 
 
-    if intent == "discovery":
-        return "discovery_evidence"
-
-
     if intent == "gene_explanation":
         return "gene_explanation"
+
+
+    if intent == "biological_pattern":
+        return "biological_pattern_evidence"
+
+
+    if intent == "discovery":
+        return "discovery_evidence"
 
 
     return "parse_query"
@@ -163,6 +169,12 @@ def build_graph():
         gene_explanation_node,
     )
 
+
+    builder.add_node(
+        "biological_pattern_evidence",
+        biological_pattern_evidence_node,
+    )
+
     # Main path
     builder.add_edge(
         START,
@@ -179,6 +191,9 @@ def build_graph():
             "gene_explanation":
                 "gene_explanation",
 
+            "biological_pattern_evidence":
+                "biological_pattern_evidence",
+
             "parse_query":
                 "parse_query",
         },
@@ -192,6 +207,12 @@ def build_graph():
     
     builder.add_edge(
         "gene_explanation",
+        "build_report",
+    )
+
+
+    builder.add_edge(
+        "biological_pattern_evidence",
         "build_report",
     )
 
