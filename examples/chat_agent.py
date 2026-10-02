@@ -399,6 +399,8 @@ def show_evidence(report):
         report.get("gene_reasoning")
         or
         report.get("discovery_evidence")
+        or
+        report.get("biological_pattern_evidence")
     ):
         return
 
@@ -568,6 +570,80 @@ def format_agent_answer(
                 f"{item['feature']}: "
                 +
                 f"rho={item['spearman_rho']:.3f}"
+            )
+
+
+        return "\n".join(lines)
+
+
+
+    biological = final_report.get(
+        "biological_pattern_evidence"
+    )
+
+
+    if biological:
+
+        lines = [
+            "Biological pattern interpretation:",
+            "",
+            (
+                f"Cluster {biological.get('fine_cluster')} "
+                f"shows a "
+                f"{biological.get('visibility_pattern')} "
+                "visibility pattern."
+            ),
+            "",
+            (
+                "Preferred scale: "
+                f"{biological.get('dominant_preferred_scale')}"
+            ),
+            "",
+            "Cross-scale visibility:",
+        ]
+
+
+        for scale, value in biological.get(
+            "visibility",
+            {}
+        ).items():
+
+            lines.append(
+                f"- {scale}: {value:.3f}"
+            )
+
+
+        lines.extend(
+            [
+                "",
+                "Associated biological programs:",
+            ]
+        )
+
+
+        programs = biological.get(
+            "biological_programs",
+            {}
+        )
+
+
+        if programs.get(
+            "hallmark"
+        ):
+            lines.append(
+                "- Hallmark: "
+                +
+                programs["hallmark"]
+            )
+
+
+        if programs.get(
+            "go_reactome"
+        ):
+            lines.append(
+                "- GO/Reactome: "
+                +
+                programs["go_reactome"]
             )
 
 
