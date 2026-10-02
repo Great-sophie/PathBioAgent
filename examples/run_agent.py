@@ -1,21 +1,64 @@
+#!/usr/bin/env python3
+
+"""
+Command-line runner for PathBioAgent.
+
+Core design
+-----------
+The LangGraph workflow remains deterministic:
+
+    query
+      ↓
+    structured query interpretation
+      ↓
+    candidate search
+      ↓
+    evidence collection
+      ↓
+    evidence gate
+      ↓
+    final_report
+
+Optional:
+
+    final_report
+      ↓
+    --explain
+      ↓
+    LLM scientific interpretation
+
+The LLM explanation layer does NOT modify:
+    - ranking
+    - evidence
+    - evidence gate
+    - candidate status
+"""
+
+
 import argparse
 import json
-from pathlib import Path
-from typing import Any, Dict, List
+import sys
+from typing import Any, Dict, List, Optional
+
 
 from pathbioagent.graph import build_graph
 
 
+
 # ============================================================
-# CLI arguments
+# Argument parser
 # ============================================================
 
-def parse_args() -> argparse.Namespace:
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    """
+    Build command-line argument parser.
+    """
+
     parser = argparse.ArgumentParser(
         description=(
-            "PathBioAgent: evidence-driven LangGraph agent "
-            "for multiscale morphology-molecular hypothesis "
-            "analysis."
+            "Run PathBioAgent on a morphology-molecular "
+            "evidence query."
         )
     )
 
@@ -23,11 +66,7 @@ def parse_args() -> argparse.Namespace:
         "--query",
         type=str,
         required=True,
-        help=(
-            "Scientific question, e.g. "
-            "'Which programs have the most robust "
-            "10x preference?'"
-        ),
+        help="Scientific query for PathBioAgent.",
     )
 
     parser.add_argument(
@@ -35,748 +74,832 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=10,
         help=(
-            "Maximum number of candidate programs "
-            "to evaluate. Default: 10."
+            "Maximum number of candidate evaluation "
+            "iterations. Default: 10."
         ),
     )
 
     parser.add_argument(
         "--show-trace",
         action="store_true",
-        help=(
-            "Print the complete LangGraph execution trace."
-        ),
+        help="Print the auditable LangGraph execution trace.",
     )
 
     parser.add_argument(
-        "--full-cards",
+        "--show-evidence",
+        action="store_true",
+        help="Print compact evidence cards.",
+    )
+
+    parser.add_argument(
+        "--explain",
         action="store_true",
         help=(
-            "Print complete Evidence Cards as JSON."
+            "Generate an optional LLM scientific explanation "
+            "after deterministic evidence analysis."
         ),
     )
 
     parser.add_argument(
-        "--save-json",
-        type=str,
-        default=None,
-        help=(
-            "Optional output JSON path, e.g. "
-            "outputs/report.json"
-        ),
+        "--json",
+        action="store_true",
+        help="Print the complete final report as JSON.",
     )
 
-    return parser.parse_args()
+    return parser
+
 
 
 # ============================================================
 # Formatting helpers
 # ============================================================
 
-def print_header(
+
+def _print_header(
     title: str,
 ) -> None:
+    """
+    Print section header.
+    """
+
     print()
-    print("=" * 78)
+    print("=" * 72)
     print(title)
-    print("=" * 78)
+    print("=" * 72)
 
 
-def print_program_group(
-    title: str,
-    programs: List[str],
-) -> None:
-    print()
-    print(title)
 
-    if not programs:
-        print("  None")
-        return
+def _safe_list(
+    value: Any,
+) -> List[Any]:
+    """
+    Convert optional report value into a list.
+    """
 
-    for index, program in enumerate(
-        programs,
-        start=1,
+    if value is None:
+        return []
+
+    if isinstance(
+        value,
+        list,
     ):
-        print(
-            f"  {index}. {program}"
-        )
+        return value
+
+    return [value]
 
 
-def format_optional_float(
+
+def _format_value(
     value: Any,
 ) -> str:
     """
-    Format numerical values safely.
-
-    Returns 'None' when value is unavailable.
+    Human-readable formatting for CLI values.
     """
 
     if value is None:
         return "None"
 
-    try:
-        return f"{float(value):.3f}"
-
-    except (
-        TypeError,
-        ValueError,
+    if isinstance(
+        value,
+        float,
     ):
-        return str(value)
+        return f"{value:.3f}"
+
+    return str(value)
+
 
 
 # ============================================================
-# Compact Evidence Card
+# Query metadata
 # ============================================================
 
-def print_compact_card(
-    card: Dict[str, Any],
+
+def print_query_summary(
+    result: Dict[str, Any],
+    report: Dict[str, Any],
 ) -> None:
-    program = card.get(
-        "program",
-        "unknown",
-    )
+    """
+    Print structured query interpretation.
+    """
 
-    status = card.get(
-        "status",
-        "unknown",
-    )
-
-    vote_scale = card.get(
-        "vote_preferred_scale"
-    )
-
-    median_scale = card.get(
-        "cross_model_median_optimum_scale"
-    )
-
-    agreement = card.get(
-        "max_models_agree"
-    )
-
-    votes = card.get(
-        "scale_votes",
+    structured = result.get(
+        "structured_query",
         {},
-    ) or {}
-
-    conflict = card.get(
-        "evidence_conflict",
-        False,
     )
 
-    stability = card.get(
-        "median_optimum_stability_fraction"
-    )
-
-    lomo = card.get(
-        "lomo_compatibility_fraction"
-    )
-
-    flags = card.get(
-        "evidence_flags",
-        {},
-    ) or {}
-
-    reasons = card.get(
-        "reasons",
-        [],
-    ) or []
-
-    print()
-    print("-" * 78)
-
-    print(
-        f"Program: {program}"
-    )
-
-    print(
-        f"Status: {status}"
-    )
-
-    print(
-        "Vote preferred scale: "
-        f"{vote_scale}"
-    )
-
-    print(
-        "Cross-model median optimum: "
-        f"{median_scale}"
-    )
-
-    if agreement is not None:
-        print(
-            "Model agreement: "
-            f"{agreement}/8"
-        )
-
-    if votes:
-        print(
-            "Scale votes: "
-            f"2.5x={votes.get('2p5x')}, "
-            f"10x={votes.get('10x')}, "
-            f"40x={votes.get('40x')}"
-        )
-
-    print(
-        "Evidence conflict: "
-        f"{conflict}"
-    )
-
-    if stability is not None:
-        print(
-            "Optimum stability: "
-            f"{format_optional_float(stability)}"
-        )
-
-    if lomo is not None:
-        print(
-            "LOMO compatibility: "
-            f"{format_optional_float(lomo)}"
-        )
-
-    active_flags = [
-        name
-        for name, value in flags.items()
-        if value
-    ]
-
-    if active_flags:
-        print(
-            "Evidence flags: "
-            + ", ".join(
-                active_flags
-            )
-        )
-
-    else:
-        print(
-            "Evidence flags: none"
-        )
-
-    if reasons:
-        print("Reasons:")
-
-        for reason in reasons:
-            print(
-                f"  - {reason}"
-            )
+    if not isinstance(
+        structured,
+        dict,
+    ):
+        structured = {}
 
 
-# ============================================================
-# Full Evidence Card
-# ============================================================
-
-def print_full_card(
-    card: Dict[str, Any],
-) -> None:
-    print()
-    print("-" * 78)
-
-    print(
-        json.dumps(
-            card,
-            indent=2,
-            ensure_ascii=False,
-        )
-    )
-
-
-# ============================================================
-# Report access helpers
-# ============================================================
-
-def get_supported(
-    report: Dict[str, Any],
-) -> List[str]:
-    return report.get(
-        "supported_exploratory_hypotheses",
-        report.get(
-            "supported",
-            [],
+    ranking_intent = report.get(
+        "ranking_intent",
+        structured.get(
+            "intent"
         ),
     )
 
 
-def get_not_supported(
-    report: Dict[str, Any],
-) -> List[str]:
-    return report.get(
-        "not_supported",
-        [],
-    )
-
-
-def get_insufficient(
-    report: Dict[str, Any],
-) -> List[str]:
-    return report.get(
-        "insufficient_robustness_evidence",
-        report.get(
-            "insufficient",
-            [],
-        ),
-    )
-
-
-def get_not_eligible(
-    report: Dict[str, Any],
-) -> List[str]:
-    return report.get(
-        "not_eligible",
-        [],
-    )
-
-
-# ============================================================
-# Main report printer
-# ============================================================
-
-def print_report(
-    report: Dict[str, Any],
-    *,
-    full_cards: bool = False,
-) -> None:
-    print_header(
-        "PATHBIOAGENT REPORT"
-    )
-
-    print(
-        "Query:",
-        report.get(
-            "query"
-        ),
-    )
-
-    print(
-        "Ranking intent:",
-        report.get(
-            "ranking_intent"
-        ),
-    )
-
-    print(
-        "Target scale:",
-        report.get(
+    target_scale = report.get(
+        "target_scale",
+        structured.get(
             "target_scale"
         ),
     )
 
-    parser_source = report.get(
-        "parser_source"
+
+    entity = report.get(
+        "entity",
+        structured.get(
+            "entity"
+        ),
     )
 
-    if parser_source is not None:
-        print(
-            "Query parser:",
-            parser_source,
-        )
+
+    parser_source = report.get(
+        "parser_source",
+        structured.get(
+            "parser_source"
+        ),
+    )
+
 
     confidence = report.get(
-        "query_confidence"
+        "query_confidence",
+        structured.get(
+            "confidence"
+        ),
     )
 
-    if confidence is not None:
-        print(
-            "Query confidence:",
-            format_optional_float(
-                confidence
-            ),
-        )
 
     model_name = report.get(
-        "model_name"
+        "model_name",
+        structured.get(
+            "model_name"
+        ),
     )
 
-    if model_name:
-        print(
-            "LLM model:",
-            model_name,
-        )
 
-    # --------------------------------------------------------
-    # Candidate accounting
-    # --------------------------------------------------------
+    _print_header(
+        "QUERY INTERPRETATION"
+    )
 
-    n_tested = report.get(
+
+    print(
+        "Query:",
+        report.get(
+            "query",
+            result.get(
+                "query",
+                ""
+            ),
+        ),
+    )
+
+
+    print(
+        "Ranking intent:",
+        _format_value(
+            ranking_intent
+        ),
+    )
+
+
+    print(
+        "Target scale:",
+        _format_value(
+            target_scale
+        ),
+    )
+
+
+    print(
+        "Entity:",
+        _format_value(
+            entity
+        ),
+    )
+
+
+    print(
+        "Query parser:",
+        _format_value(
+            parser_source
+        ),
+    )
+
+
+    print(
+        "Query confidence:",
+        _format_value(
+            confidence
+        ),
+    )
+
+
+    print(
+        "LLM model:",
+        _format_value(
+            model_name
+        ),
+    )
+
+
+
+# ============================================================
+# Candidate summary
+# ============================================================
+
+
+def print_candidate_summary(
+    report: Dict[str, Any],
+) -> None:
+    """
+    Print candidate testing summary.
+    """
+
+    tested = report.get(
         "candidates_tested",
         report.get(
             "n_tested",
-            0,
+            None,
         ),
     )
 
-    n_candidates = report.get(
+
+    total = report.get(
         "total_candidates",
         report.get(
             "n_candidates",
-            0,
+            None,
         ),
     )
+
+
+    supported = _safe_list(
+        report.get(
+            "supported_exploratory_hypotheses"
+        )
+    )
+
+
+    not_supported = _safe_list(
+        report.get(
+            "not_supported"
+        )
+    )
+
+
+    insufficient = _safe_list(
+        report.get(
+            "insufficient_robustness_evidence"
+        )
+    )
+
+
+    not_eligible = _safe_list(
+        report.get(
+            "not_eligible"
+        )
+    )
+
+
+    _print_header(
+        "DETERMINISTIC EVIDENCE RESULT"
+    )
+
+
+    if (
+        tested is not None
+        or total is not None
+    ):
+        print(
+            "Candidates tested:",
+            f"{tested}/{total}",
+        )
+
+
+    print()
+
 
     print(
-        "Candidates tested:",
-        f"{n_tested}/{n_candidates}",
+        "Supported exploratory hypotheses:"
     )
 
-    # ========================================================
-    # Primary decisions
-    # ========================================================
 
-    print_header(
-        "PRIMARY DECISIONS"
-    )
+    if supported:
 
-    print_program_group(
-        "SUPPORTED EXPLORATORY HYPOTHESES",
-        get_supported(
-            report
-        ),
-    )
+        for program in supported:
 
-    print_program_group(
-        "NOT SUPPORTED",
-        get_not_supported(
-            report
-        ),
-    )
+            print(
+                f"  - {program}"
+            )
 
-    print_program_group(
-        "INSUFFICIENT ROBUSTNESS EVIDENCE",
-        get_insufficient(
-            report
-        ),
-    )
+    else:
 
-    print_program_group(
-        "NOT ELIGIBLE",
-        get_not_eligible(
-            report
-        ),
-    )
-
-    unknown = report.get(
-        "unknown_status",
-        [],
-    )
-
-    if unknown:
-        print_program_group(
-            "UNKNOWN STATUS",
-            unknown,
+        print(
+            "  None"
         )
 
-    # ========================================================
-    # Evidence diagnostics
-    # ========================================================
 
-    print_header(
-        "EVIDENCE DIAGNOSTICS"
-    )
+    if not_supported:
 
-    print_program_group(
-        "AGGREGATION CONFLICT",
-        report.get(
-            "evidence_conflict_programs",
-            report.get(
-                "aggregation_conflict",
-                [],
-            ),
-        ),
-    )
-
-    print_program_group(
-        "TIE CONSENSUS",
-        report.get(
-            "tie_consensus_programs",
-            report.get(
-                "tie_consensus",
-                [],
-            ),
-        ),
-    )
-
-    print_program_group(
-        "LOW OPTIMUM STABILITY",
-        report.get(
-            "low_optimum_stability_programs",
-            [],
-        ),
-    )
-
-    print_program_group(
-        "LOW LOMO COMPATIBILITY",
-        report.get(
-            "low_lomo_compatibility_programs",
-            [],
-        ),
-    )
-
-    print_program_group(
-        "MISSING ROBUSTNESS",
-        report.get(
-            "missing_robustness_programs",
-            [],
-        ),
-    )
-
-    missing_lomo = report.get(
-        "missing_lomo_programs",
-        [],
-    )
-
-    if missing_lomo:
-        print_program_group(
-            "MISSING LOMO",
-            missing_lomo,
+        print()
+        print(
+            "Not supported:"
         )
 
-    weak_consensus = report.get(
-        "weak_model_consensus_programs",
-        [],
-    )
+        for program in not_supported:
 
-    if weak_consensus:
-        print_program_group(
-            "WEAK MODEL CONSENSUS",
-            weak_consensus,
+            print(
+                f"  - {program}"
+            )
+
+
+    if insufficient:
+
+        print()
+        print(
+            "Insufficient robustness evidence:"
         )
 
-    # ========================================================
-    # Evidence Cards
-    # ========================================================
+        for program in insufficient:
 
-    print_header(
+            print(
+                f"  - {program}"
+            )
+
+
+    if not_eligible:
+
+        print()
+        print(
+            "Not eligible:"
+        )
+
+        for program in not_eligible:
+
+            print(
+                f"  - {program}"
+            )
+
+
+
+# ============================================================
+# Evidence cards
+# ============================================================
+
+
+def print_evidence_cards(
+    report: Dict[str, Any],
+) -> None:
+    """
+    Print evidence cards in compact readable form.
+    """
+
+    cards = _safe_list(
+        report.get(
+            "evidence_cards"
+        )
+    )
+
+
+    _print_header(
         "EVIDENCE CARDS"
     )
 
-    cards = report.get(
-        "evidence_cards",
-        [],
-    )
 
     if not cards:
+
         print(
-            "No Evidence Cards available."
+            "No evidence cards available."
         )
 
-    else:
-        for card in cards:
+        return
 
-            if full_cards:
-                print_full_card(
-                    card
+
+    for index, card in enumerate(
+        cards,
+        start=1,
+    ):
+
+        if not isinstance(
+            card,
+            dict,
+        ):
+
+            print(
+                f"{index}. {card}"
+            )
+
+            continue
+
+
+        print(
+            f"{index}. "
+            f"{card.get('program', 'Unknown')}"
+        )
+
+
+        print(
+            "   status:",
+            _format_value(
+                card.get(
+                    "status"
                 )
+            ),
+        )
 
-            else:
-                print_compact_card(
-                    card
+
+        print(
+            "   vote preferred scale:",
+            _format_value(
+                card.get(
+                    "vote_preferred_scale"
                 )
-
-    # ========================================================
-    # Interpretation scope
-    # ========================================================
-
-    print_header(
-        "INTERPRETATION SCOPE"
-    )
-
-    interpretation_scope = (
-        report.get(
-            "interpretation_scope"
+            ),
         )
-    )
 
-    if interpretation_scope:
+
         print(
-            interpretation_scope
+            "   model agreement:",
+            _format_value(
+                card.get(
+                    "max_models_agree"
+                )
+            ),
         )
 
-    else:
+
         print(
-            "Results are exploratory and should not be "
-            "interpreted as clinical biomarker validation, "
-            "biological causality, or patient-level "
-            "molecular diagnosis."
+            "   median optimum scale:",
+            _format_value(
+                card.get(
+                    "cross_model_median_optimum_scale"
+                )
+            ),
         )
+
+
+        print(
+            "   optimum stability:",
+            _format_value(
+                card.get(
+                    "median_optimum_stability_fraction"
+                )
+            ),
+        )
+
+
+        print(
+            "   LOMO compatibility:",
+            _format_value(
+                card.get(
+                    "lomo_compatibility_fraction"
+                )
+            ),
+        )
+
+
+        flags = card.get(
+            "evidence_flags"
+        )
+
+
+        if flags:
+
+            print(
+                "   evidence flags:",
+                flags,
+            )
+
+
+        reasons = card.get(
+            "reasons"
+        )
+
+
+        if reasons:
+
+            print(
+                "   reasons:",
+                reasons,
+            )
+
+
+        print()
+
 
 
 # ============================================================
 # Trace
 # ============================================================
 
+
 def print_trace(
-    trace: List[str],
+    result: Dict[str, Any],
 ) -> None:
-    print_header(
-        "AGENT TRACE"
+    """
+    Print execution trace.
+    """
+
+    trace = _safe_list(
+        result.get(
+            "trace"
+        )
     )
 
+
+    _print_header(
+        "EXECUTION TRACE"
+    )
+
+
     if not trace:
+
         print(
-            "No trace available."
+            "No trace entries available."
         )
+
         return
 
-    for index, event in enumerate(
+
+    for index, entry in enumerate(
         trace,
         start=1,
     ):
+
         print(
-            f"{index:02d}. {event}"
+            f"{index}. {entry}"
         )
 
 
+
 # ============================================================
-# Save JSON
+# Optional LLM explanation
 # ============================================================
 
-def save_json_report(
-    output_path: str,
-    *,
+
+def generate_optional_explanation(
     report: Dict[str, Any],
-    trace: List[str],
+) -> Optional[str]:
+    """
+    Generate optional scientific explanation.
+
+    Import is intentionally lazy so ordinary deterministic
+    execution does not require the report-generation LLM.
+    """
+
+    try:
+
+        from pathbioagent.llm.report_generator import (
+            generate_scientific_summary,
+        )
+
+
+        explanation = (
+            generate_scientific_summary(
+                report
+            )
+        )
+
+
+        if explanation is None:
+
+            return None
+
+
+        return str(
+            explanation
+        ).strip()
+
+
+    except Exception as exc:
+
+        print(
+            "\nWarning: scientific explanation "
+            f"generation failed: {exc}",
+            file=sys.stderr,
+        )
+
+        return None
+
+
+
+# ============================================================
+# JSON output
+# ============================================================
+
+
+def print_json_report(
+    report: Dict[str, Any],
 ) -> None:
-    path = Path(
-        output_path
+    """
+    Print complete report as JSON.
+    """
+
+    _print_header(
+        "FINAL REPORT JSON"
     )
 
-    if path.parent != Path("."):
-        path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
 
-    payload = {
-        "report":
+    print(
+        json.dumps(
             report,
-
-        "trace":
-            trace,
-    }
-
-    with path.open(
-        "w",
-        encoding="utf-8",
-    ) as handle:
-        json.dump(
-            payload,
-            handle,
             indent=2,
             ensure_ascii=False,
+            default=str,
         )
-
-    print()
-    print(
-        "Saved JSON report:",
-        path,
     )
+
 
 
 # ============================================================
 # Main
 # ============================================================
 
-def main() -> None:
-    args = parse_args()
 
-    if not args.query.strip():
-        raise ValueError(
-            "--query cannot be empty."
-        )
+def main() -> int:
+    """
+    Run PathBioAgent.
+    """
+
+    parser = (
+        build_argument_parser()
+    )
+
+
+    args = parser.parse_args()
+
 
     if args.max_iterations < 1:
-        raise ValueError(
-            "--max-iterations must be >= 1."
+
+        parser.error(
+            "--max-iterations must be >= 1"
         )
 
-    print_header(
-        "PathBioAgent"
-    )
-
-    print(
-        "Query:",
-        args.query,
-    )
-
-    print(
-        "Max iterations:",
-        args.max_iterations,
-    )
 
     # --------------------------------------------------------
-    # Build graph
+    # Build deterministic LangGraph
     # --------------------------------------------------------
 
     graph = build_graph()
 
-    # --------------------------------------------------------
-    # Invoke Agent
-    # --------------------------------------------------------
 
-    result = graph.invoke(
-        {
-            "query":
-                args.query,
+    initial_state = {
 
-            "max_iterations":
-                args.max_iterations,
+        "query":
+            args.query,
 
-            "trace":
-                [],
-        }
-    )
+        "max_iterations":
+            args.max_iterations,
+
+        "trace":
+            [],
+
+    }
+
 
     # --------------------------------------------------------
-    # Extract final report
+    # Run agent
     # --------------------------------------------------------
 
-    report = result.get(
-        "final_report"
-    )
+    try:
 
-    if report is None:
-        raise RuntimeError(
-            "PathBioAgent finished without "
-            "producing final_report."
+        result = graph.invoke(
+            initial_state
         )
 
-    trace = result.get(
-        "trace",
-        [],
+    except Exception as exc:
+
+        print(
+            "PathBioAgent execution failed:",
+            exc,
+            file=sys.stderr,
+        )
+
+        return 1
+
+
+    if not isinstance(
+        result,
+        dict,
+    ):
+
+        print(
+            "PathBioAgent returned an invalid graph state.",
+            file=sys.stderr,
+        )
+
+        return 1
+
+
+    report = result.get(
+        "final_report",
+        {},
     )
 
-    # --------------------------------------------------------
-    # Print report
-    # --------------------------------------------------------
 
-    print_report(
+    if not isinstance(
         report,
-        full_cards=args.full_cards,
-    )
+        dict,
+    ):
+
+        print(
+            "PathBioAgent did not return a valid final_report.",
+            file=sys.stderr,
+        )
+
+        return 1
+
 
     # --------------------------------------------------------
-    # Trace
+    # Core deterministic result
+    # --------------------------------------------------------
+
+    print_query_summary(
+        result,
+        report,
+    )
+
+
+    print_candidate_summary(
+        report
+    )
+
+
+    # --------------------------------------------------------
+    # Optional evidence display
+    # --------------------------------------------------------
+
+    if args.show_evidence:
+
+        print_evidence_cards(
+            report
+        )
+
+
+    # --------------------------------------------------------
+    # Optional trace
     # --------------------------------------------------------
 
     if args.show_trace:
+
         print_trace(
-            trace
-        )
-
-    # --------------------------------------------------------
-    # Optional JSON output
-    # --------------------------------------------------------
-
-    if args.save_json:
-        save_json_report(
-            args.save_json,
-            report=report,
-            trace=trace,
+            result
         )
 
 
-# ============================================================
-# Entry point
-# ============================================================
+    # --------------------------------------------------------
+    # Optional LLM explanation
+    # --------------------------------------------------------
+
+    if args.explain:
+
+        explanation = (
+            generate_optional_explanation(
+                report
+            )
+        )
+
+
+        _print_header(
+            "SCIENTIFIC INTERPRETATION"
+        )
+
+
+        if explanation:
+
+            print(
+                explanation
+            )
+
+        else:
+
+            print(
+                "Scientific interpretation "
+                "was not generated."
+            )
+
+
+    # --------------------------------------------------------
+    # Optional JSON
+    # --------------------------------------------------------
+
+    if args.json:
+
+        print_json_report(
+            report
+        )
+
+
+    return 0
+
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(
+        main()
+    )
