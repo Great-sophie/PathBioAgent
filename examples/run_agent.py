@@ -1,838 +1,430 @@
 #!/usr/bin/env python3
 
 """
-Command-line runner for PathBioAgent.
+PathBioAgent command line runner.
 
-Core design
------------
-The LangGraph workflow remains deterministic:
-
-    query
-      ↓
-    structured query interpretation
-      ↓
-    candidate search
-      ↓
-    evidence collection
-      ↓
-    evidence gate
-      ↓
-    final_report
-
-Optional:
-
-    final_report
-      ↓
-    --explain
-      ↓
-    LLM scientific interpretation
-
-The LLM explanation layer does NOT modify:
-    - ranking
-    - evidence
-    - evidence gate
-    - candidate status
+Supports:
+    - natural language query
+    - structured query interpretation
+    - evidence-grounded report
+    - scientific explanation
+    - JSON export
 """
-
 
 import argparse
 import json
-import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 
 from pathbioagent.graph import build_graph
-
-
-
-# ============================================================
-# Argument parser
-# ============================================================
-
-
-def build_argument_parser() -> argparse.ArgumentParser:
-    """
-    Build command-line argument parser.
-    """
-
-    parser = argparse.ArgumentParser(
-        description=(
-            "Run PathBioAgent on a morphology-molecular "
-            "evidence query."
-        )
-    )
-
-    parser.add_argument(
-        "--query",
-        type=str,
-        required=True,
-        help="Scientific query for PathBioAgent.",
-    )
-
-    parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=10,
-        help=(
-            "Maximum number of candidate evaluation "
-            "iterations. Default: 10."
-        ),
-    )
-
-    parser.add_argument(
-        "--show-trace",
-        action="store_true",
-        help="Print the auditable LangGraph execution trace.",
-    )
-
-    parser.add_argument(
-        "--show-evidence",
-        action="store_true",
-        help="Print compact evidence cards.",
-    )
-
-    parser.add_argument(
-        "--explain",
-        action="store_true",
-        help=(
-            "Generate an optional LLM scientific explanation "
-            "after deterministic evidence analysis."
-        ),
-    )
-
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Print the complete final report as JSON.",
-    )
-
-    return parser
-
 
 
 # ============================================================
 # Formatting helpers
 # ============================================================
 
-
-def _print_header(
-    title: str,
-) -> None:
-    """
-    Print section header.
-    """
-
+def print_header(title: str):
     print()
     print("=" * 72)
     print(title)
     print("=" * 72)
 
 
+def print_query_interpretation(report: Dict[str, Any]):
 
-def _safe_list(
-    value: Any,
-) -> List[Any]:
-    """
-    Convert optional report value into a list.
-    """
-
-    if value is None:
-        return []
-
-    if isinstance(
-        value,
-        list,
-    ):
-        return value
-
-    return [value]
-
-
-
-def _format_value(
-    value: Any,
-) -> str:
-    """
-    Human-readable formatting for CLI values.
-    """
-
-    if value is None:
-        return "None"
-
-    if isinstance(
-        value,
-        float,
-    ):
-        return f"{value:.3f}"
-
-    return str(value)
-
-
-
-# ============================================================
-# Query metadata
-# ============================================================
-
-
-def print_query_summary(
-    result: Dict[str, Any],
-    report: Dict[str, Any],
-) -> None:
-    """
-    Print structured query interpretation.
-    """
-
-    structured = result.get(
-        "structured_query",
-        {},
-    )
-
-    if not isinstance(
-        structured,
-        dict,
-    ):
-        structured = {}
-
-
-    ranking_intent = report.get(
-        "ranking_intent",
-        structured.get(
-            "intent"
-        ),
-    )
-
-
-    target_scale = report.get(
-        "target_scale",
-        structured.get(
-            "target_scale"
-        ),
-    )
-
-
-    entity = report.get(
-        "entity",
-        structured.get(
-            "entity"
-        ),
-    )
-
-
-    parser_source = report.get(
-        "parser_source",
-        structured.get(
-            "parser_source"
-        ),
-    )
-
-
-    confidence = report.get(
-        "query_confidence",
-        structured.get(
-            "confidence"
-        ),
-    )
-
-
-    model_name = report.get(
-        "model_name",
-        structured.get(
-            "model_name"
-        ),
-    )
-
-
-    _print_header(
+    print_header(
         "QUERY INTERPRETATION"
     )
 
+    print(
+        f"Query: {report.get('query')}"
+    )
 
     print(
-        "Query:",
-        report.get(
-            "query",
-            result.get(
-                "query",
-                ""
-            ),
-        ),
+        f"Ranking intent: "
+        f"{report.get('ranking_intent')}"
     )
-
 
     print(
-        "Ranking intent:",
-        _format_value(
-            ranking_intent
-        ),
+        f"Target scale: "
+        f"{report.get('target_scale')}"
     )
-
 
     print(
-        "Target scale:",
-        _format_value(
-            target_scale
-        ),
+        f"Entity: "
+        f"{report.get('entity')}"
     )
-
 
     print(
-        "Entity:",
-        _format_value(
-            entity
-        ),
+        f"Query parser: "
+        f"{report.get('parser_source')}"
     )
-
 
     print(
-        "Query parser:",
-        _format_value(
-            parser_source
-        ),
+        f"Query confidence: "
+        f"{report.get('query_confidence')}"
     )
 
-
-    print(
-        "Query confidence:",
-        _format_value(
-            confidence
-        ),
-    )
-
-
-    print(
-        "LLM model:",
-        _format_value(
-            model_name
-        ),
-    )
-
-
-
-# ============================================================
-# Candidate summary
-# ============================================================
-
-
-def print_candidate_summary(
-    report: Dict[str, Any],
-) -> None:
-    """
-    Print candidate testing summary.
-    """
-
-    tested = report.get(
-        "candidates_tested",
-        report.get(
-            "n_tested",
-            None,
-        ),
-    )
-
-
-    total = report.get(
-        "total_candidates",
-        report.get(
-            "n_candidates",
-            None,
-        ),
-    )
-
-
-    supported = _safe_list(
-        report.get(
-            "supported_exploratory_hypotheses"
-        )
-    )
-
-
-    not_supported = _safe_list(
-        report.get(
-            "not_supported"
-        )
-    )
-
-
-    insufficient = _safe_list(
-        report.get(
-            "insufficient_robustness_evidence"
-        )
-    )
-
-
-    not_eligible = _safe_list(
-        report.get(
-            "not_eligible"
-        )
-    )
-
-
-    _print_header(
-        "DETERMINISTIC EVIDENCE RESULT"
-    )
-
-
-    if (
-        tested is not None
-        or total is not None
+    if report.get(
+        "model_name"
     ):
         print(
-            "Candidates tested:",
-            f"{tested}/{total}",
+            f"LLM model: "
+            f"{report.get('model_name')}"
+        )
+
+
+# ============================================================
+# Scientific result display
+# ============================================================
+
+def print_visibility_ranking(
+    report: Dict[str, Any]
+):
+
+    print_header(
+        "TARGET-SCALE VISIBILITY RANKING"
+    )
+
+    print(
+        f"Scale: {report.get('target_scale')}"
+    )
+
+    print(
+        f"Metric: "
+        f"{report.get('visibility_ranking_metric')}"
+    )
+
+    print()
+
+    ranking = report.get(
+        "visibility_ranking",
+        []
+    )
+
+    print(
+        f"{'Rank':<6}"
+        f"{'Program':<35}"
+        f"{'Visibility':<12}"
+        f"Status"
+    )
+
+    print("-" * 72)
+
+    for item in ranking:
+
+        print(
+            f"{item.get('rank', ''):<6}"
+            f"{item.get('program',''):<35}"
+            f"{item.get('median_across_models',0):<12.4f}"
+            f"{item.get('scale_hypothesis_status','')}"
         )
 
 
     print()
 
+    print(
+        "Interpretation:"
+    )
 
     print(
-        "Supported exploratory hypotheses:"
+        "Ranking is based on absolute "
+        "target-scale molecular visibility."
+    )
+
+    print(
+        "Scale preference and robustness "
+        "are reported as secondary diagnostics."
     )
 
 
+def print_hypothesis_result(
+    report: Dict[str, Any]
+):
+
+    print_header(
+        "SUPPORTED EXPLORATORY HYPOTHESES"
+    )
+
+    supported = report.get(
+        "supported_exploratory_hypotheses",
+        []
+    )
+
     if supported:
 
-        for program in supported:
-
+        for item in supported:
             print(
-                f"  - {program}"
+                f"  - {item}"
             )
 
     else:
 
         print(
-            "  None"
+            "None"
         )
 
+    print()
 
-    if not_supported:
+    print(
+        "Not supported:"
+    )
 
-        print()
+    for item in report.get(
+        "not_supported",
+        []
+    ):
+
         print(
-            "Not supported:"
+            f"  - {item}"
         )
-
-        for program in not_supported:
-
-            print(
-                f"  - {program}"
-            )
-
-
-    if insufficient:
-
-        print()
-        print(
-            "Insufficient robustness evidence:"
-        )
-
-        for program in insufficient:
-
-            print(
-                f"  - {program}"
-            )
-
-
-    if not_eligible:
-
-        print()
-        print(
-            "Not eligible:"
-        )
-
-        for program in not_eligible:
-
-            print(
-                f"  - {program}"
-            )
-
-
-
-# ============================================================
-# Evidence cards
-# ============================================================
 
 
 def print_evidence_cards(
-    report: Dict[str, Any],
-) -> None:
-    """
-    Print evidence cards in compact readable form.
-    """
+    report: Dict[str, Any]
+):
 
-    cards = _safe_list(
-        report.get(
-            "evidence_cards"
-        )
-    )
-
-
-    _print_header(
+    print_header(
         "EVIDENCE CARDS"
     )
 
-
-    if not cards:
-
-        print(
-            "No evidence cards available."
-        )
-
-        return
-
-
-    for index, card in enumerate(
-        cards,
+    for idx, card in enumerate(
+        report.get(
+            "evidence_cards",
+            []
+        ),
         start=1,
     ):
 
-        if not isinstance(
-            card,
-            dict,
+        print(
+            f"{idx}. "
+            f"{card.get('program')}"
+        )
+
+        print(
+            f"   status: "
+            f"{card.get('status')}"
+        )
+
+        if (
+            "target_scale_visibility"
+            in card
         ):
 
-            print(
-                f"{index}. {card}"
+            visibility = (
+                card[
+                    "target_scale_visibility"
+                ]
             )
 
-            continue
-
-
-        print(
-            f"{index}. "
-            f"{card.get('program', 'Unknown')}"
-        )
-
-
-        print(
-            "   status:",
-            _format_value(
-                card.get(
-                    "status"
-                )
-            ),
-        )
-
-
-        print(
-            "   vote preferred scale:",
-            _format_value(
-                card.get(
-                    "vote_preferred_scale"
-                )
-            ),
-        )
-
-
-        print(
-            "   model agreement:",
-            _format_value(
-                card.get(
-                    "max_models_agree"
-                )
-            ),
-        )
-
-
-        print(
-            "   median optimum scale:",
-            _format_value(
-                card.get(
-                    "cross_model_median_optimum_scale"
-                )
-            ),
-        )
-
-
-        print(
-            "   optimum stability:",
-            _format_value(
-                card.get(
-                    "median_optimum_stability_fraction"
-                )
-            ),
-        )
-
-
-        print(
-            "   LOMO compatibility:",
-            _format_value(
-                card.get(
-                    "lomo_compatibility_fraction"
-                )
-            ),
-        )
-
-
-        flags = card.get(
-            "evidence_flags"
-        )
-
-
-        if flags:
-
             print(
-                "   evidence flags:",
-                flags,
+                "   target-scale visibility: "
+                f"{visibility.get('median_across_models'):.4f}"
             )
 
 
-        reasons = card.get(
-            "reasons"
+        print(
+            "   preferred scale: "
+            f"{card.get('vote_preferred_scale')}"
         )
 
+        print(
+            "   model agreement: "
+            f"{card.get('max_models_agree')}"
+        )
 
-        if reasons:
-
-            print(
-                "   reasons:",
-                reasons,
-            )
-
+        print(
+            "   stability: "
+            f"{card.get('median_optimum_stability_fraction')}"
+        )
 
         print()
 
 
-
 # ============================================================
-# Trace
+# Explanation
 # ============================================================
 
+def print_explanation(
+    report: Dict[str, Any]
+):
 
-def print_trace(
-    result: Dict[str, Any],
-) -> None:
-    """
-    Print execution trace.
-    """
-
-    trace = _safe_list(
-        result.get(
-            "trace"
-        )
+    print_header(
+        "SCIENTIFIC INTERPRETATION"
     )
 
-
-    _print_header(
-        "EXECUTION TRACE"
-    )
-
-
-    if not trace:
-
-        print(
-            "No trace entries available."
+    if (
+        report.get(
+            "primary_answer_type"
         )
-
-        return
-
-
-    for index, entry in enumerate(
-        trace,
-        start=1,
+        ==
+        "target_scale_visibility_ranking"
     ):
 
         print(
-            f"{index}. {entry}"
+            "This is a target-scale visibility query."
         )
-
-
-
-# ============================================================
-# Optional LLM explanation
-# ============================================================
-
-
-def generate_optional_explanation(
-    report: Dict[str, Any],
-) -> Optional[str]:
-    """
-    Generate optional scientific explanation.
-
-    Import is intentionally lazy so ordinary deterministic
-    execution does not require the report-generation LLM.
-    """
-
-    try:
-
-        from pathbioagent.llm.report_generator import (
-            generate_scientific_summary,
-        )
-
-
-        explanation = (
-            generate_scientific_summary(
-                report
-            )
-        )
-
-
-        if explanation is None:
-
-            return None
-
-
-        return str(
-            explanation
-        ).strip()
-
-
-    except Exception as exc:
 
         print(
-            "\nWarning: scientific explanation "
-            f"generation failed: {exc}",
-            file=sys.stderr,
+            "Programs are ranked by "
+            "absolute molecular visibility at "
+            f"{report.get('target_scale')}."
         )
 
-        return None
+        print()
 
+        for item in report.get(
+            "visibility_ranking",
+            []
+        )[:3]:
 
+            print(
+                f"- {item['program']}: "
+                f"{item['median_across_models']:.4f}"
+            )
 
-# ============================================================
-# JSON output
-# ============================================================
+        print()
 
-
-def print_json_report(
-    report: Dict[str, Any],
-) -> None:
-    """
-    Print complete report as JSON.
-    """
-
-    _print_header(
-        "FINAL REPORT JSON"
-    )
-
-
-    print(
-        json.dumps(
-            report,
-            indent=2,
-            ensure_ascii=False,
-            default=str,
+        print(
+            "Scale preference should not be "
+            "interpreted as the ranking criterion."
         )
-    )
 
+    else:
+
+        print(
+            "This query evaluates "
+            "scale-specific biological hypotheses."
+        )
+
+        print()
+
+        for item in report.get(
+            "supported_exploratory_hypotheses",
+            []
+        ):
+
+            print(
+                f"- {item}"
+            )
 
 
 # ============================================================
 # Main
 # ============================================================
 
+def main():
 
-def main() -> int:
-    """
-    Run PathBioAgent.
-    """
+    parser = argparse.ArgumentParser()
 
-    parser = (
-        build_argument_parser()
+    parser.add_argument(
+        "--query",
+        required=True,
+        help="Natural language query",
+    )
+
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print final JSON",
+    )
+
+    parser.add_argument(
+        "--show-evidence",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--show-trace",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--explain",
+        action="store_true",
     )
 
 
     args = parser.parse_args()
 
 
-    if args.max_iterations < 1:
-
-        parser.error(
-            "--max-iterations must be >= 1"
-        )
-
-
-    # --------------------------------------------------------
-    # Build deterministic LangGraph
-    # --------------------------------------------------------
-
     graph = build_graph()
 
 
-    initial_state = {
+    result = graph.invoke(
+        {
+            "query":
+                args.query,
 
-        "query":
-            args.query,
+            "max_iterations":
+                20,
 
-        "max_iterations":
-            args.max_iterations,
-
-        "trace":
-            [],
-
-    }
-
-
-    # --------------------------------------------------------
-    # Run agent
-    # --------------------------------------------------------
-
-    try:
-
-        result = graph.invoke(
-            initial_state
-        )
-
-    except Exception as exc:
-
-        print(
-            "PathBioAgent execution failed:",
-            exc,
-            file=sys.stderr,
-        )
-
-        return 1
-
-
-    if not isinstance(
-        result,
-        dict,
-    ):
-
-        print(
-            "PathBioAgent returned an invalid graph state.",
-            file=sys.stderr,
-        )
-
-        return 1
+            "trace":
+                [],
+        }
+    )
 
 
     report = result.get(
         "final_report",
-        {},
-    )
-
-
-    if not isinstance(
-        report,
-        dict,
-    ):
-
-        print(
-            "PathBioAgent did not return a valid final_report.",
-            file=sys.stderr,
-        )
-
-        return 1
-
-
-    # --------------------------------------------------------
-    # Core deterministic result
-    # --------------------------------------------------------
-
-    print_query_summary(
         result,
-        report,
     )
 
 
-    print_candidate_summary(
+    print_query_interpretation(
         report
     )
 
 
-    # --------------------------------------------------------
-    # Optional evidence display
-    # --------------------------------------------------------
+    print_header(
+        "DETERMINISTIC EVIDENCE RESULT"
+    )
+
+
+    print(
+        f"Candidates tested: "
+        f"{report.get('candidates_tested')}/"
+        f"{report.get('total_candidates')}"
+    )
+
+
+    if (
+        report.get(
+            "primary_answer_type"
+        )
+        ==
+        "target_scale_visibility_ranking"
+    ):
+
+        print_visibility_ranking(
+            report
+        )
+
+    else:
+
+        print_hypothesis_result(
+            report
+        )
+
+
+    if args.show_trace:
+
+        print_header(
+            "EXECUTION TRACE"
+        )
+
+        for i, item in enumerate(
+            report.get(
+                "trace",
+                []
+            ),
+            start=1,
+        ):
+
+            print(
+                f"{i}. {item}"
+            )
+
 
     if args.show_evidence:
 
@@ -841,65 +433,28 @@ def main() -> int:
         )
 
 
-    # --------------------------------------------------------
-    # Optional trace
-    # --------------------------------------------------------
-
-    if args.show_trace:
-
-        print_trace(
-            result
-        )
-
-
-    # --------------------------------------------------------
-    # Optional LLM explanation
-    # --------------------------------------------------------
-
     if args.explain:
 
-        explanation = (
-            generate_optional_explanation(
-                report
-            )
-        )
-
-
-        _print_header(
-            "SCIENTIFIC INTERPRETATION"
-        )
-
-
-        if explanation:
-
-            print(
-                explanation
-            )
-
-        else:
-
-            print(
-                "Scientific interpretation "
-                "was not generated."
-            )
-
-
-    # --------------------------------------------------------
-    # Optional JSON
-    # --------------------------------------------------------
-
-    if args.json:
-
-        print_json_report(
+        print_explanation(
             report
         )
 
 
-    return 0
+    if args.json:
 
+        print_header(
+            "FINAL REPORT JSON"
+        )
+
+        print(
+            json.dumps(
+                report,
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
 
 
 if __name__ == "__main__":
-    raise SystemExit(
-        main()
-    )
+
+    main()
