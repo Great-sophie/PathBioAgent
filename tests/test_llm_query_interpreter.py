@@ -12,6 +12,11 @@ def test_fallback_robust_10x(monkeypatch):
         raising=False,
     )
 
+    monkeypatch.delenv(
+        "DEEPSEEK_API_KEY",
+        raising=False,
+    )
+
     # Prevent .env from re-injecting an API key during tests
     monkeypatch.setattr(
         qi,
@@ -35,6 +40,11 @@ def test_fallback_robust_10x(monkeypatch):
 def test_fallback_visibility_40x(monkeypatch):
     monkeypatch.delenv(
         "OPENAI_API_KEY",
+        raising=False,
+    )
+
+    monkeypatch.delenv(
+        "DEEPSEEK_API_KEY",
         raising=False,
     )
 

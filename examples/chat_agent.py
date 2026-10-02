@@ -52,6 +52,81 @@ Type 'exit' to quit.
 
 
 
+
+def _normalize_entity_name(value):
+    if value is None:
+        return ""
+
+    value = str(value).strip().lower()
+
+    value = (
+        value
+        .replace(" / ", "/")
+        .replace("/ ", "/")
+        .replace(" /", "/")
+    )
+
+    return " ".join(
+        value.split()
+    )
+
+
+def _find_entity_card(report):
+    """
+    Find the molecular-program evidence card explicitly named
+    in the user's query.
+
+    ``report["entity"]`` stores the entity TYPE
+    ("molecular_program"), not the concrete program name.
+
+    Concrete program resolution is therefore performed
+    deterministically against the evidence-card program names.
+    """
+
+    query = _normalize_entity_name(
+        report.get(
+            "query",
+            ""
+        )
+    )
+
+    if not query:
+        return None
+
+
+    cards = report.get(
+        "evidence_cards",
+        []
+    )
+
+
+    # --------------------------------------------------------
+    # Exact program-name occurrence in the user query
+    # --------------------------------------------------------
+
+    for card in cards:
+
+        program = card.get(
+            "program"
+        )
+
+        normalized_program = (
+            _normalize_entity_name(
+                program
+            )
+        )
+
+        if (
+            normalized_program
+            and
+            normalized_program in query
+        ):
+
+            return card
+
+
+    return None
+
 def summarize_report(report):
 
     print()
@@ -68,6 +143,76 @@ def summarize_report(report):
     answer_type = report.get(
         "primary_answer_type"
     )
+
+
+    # --------------------------------------------------------
+    # Entity-specific explanation
+    # --------------------------------------------------------
+
+    entity_card = _find_entity_card(
+        report
+    )
+
+    if (
+        entity_card is not None
+        and answer_type
+        !=
+        "target_scale_visibility_ranking"
+    ):
+
+        program = entity_card.get(
+            "program"
+        )
+
+        status = entity_card.get(
+            "status",
+            "unknown",
+        )
+
+        print(
+            program
+        )
+
+        print(
+            "status:",
+            status,
+        )
+
+
+        preferred_scale = entity_card.get(
+            "vote_preferred_scale"
+        )
+
+        if preferred_scale:
+
+            print(
+                "preferred scale:",
+                preferred_scale,
+            )
+
+
+        reasons = entity_card.get(
+            "reasons",
+            [],
+        ) or []
+
+
+        if reasons:
+
+            print()
+
+            print(
+                "Why:"
+            )
+
+            for reason in reasons:
+
+                print(
+                    f"- {reason}"
+                )
+
+
+        return
 
 
     # --------------------------------------------------------
@@ -161,10 +306,25 @@ def show_evidence(report):
     )
 
 
-    for card in report.get(
-        "evidence_cards",
-        []
-    ):
+    entity_card = _find_entity_card(
+        report
+    )
+
+    if entity_card is not None:
+
+        cards = [
+            entity_card
+        ]
+
+    else:
+
+        cards = report.get(
+            "evidence_cards",
+            []
+        )
+
+
+    for card in cards:
 
         print()
 

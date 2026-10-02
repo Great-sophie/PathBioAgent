@@ -476,7 +476,15 @@ def interpret_query(
                     "system",
 
                 "content":
-                    SYSTEM_PROMPT,
+                    (
+                        SYSTEM_PROMPT
+                        + "\n\n"
+                        + (
+                            "Return the result as a valid JSON object. "
+                            "Do not use Markdown. "
+                            "Do not include any text outside the JSON object."
+                        )
+                    ),
             },
 
 
