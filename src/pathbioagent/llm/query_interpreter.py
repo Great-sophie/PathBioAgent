@@ -181,8 +181,14 @@ def _deterministic_fallback(
     return QueryInterpretation(
 
         intent=
-            infer_ranking_intent(
-                query
+            (
+                "general"
+                if _is_support_explanation_query(
+                    query
+                )
+                else infer_ranking_intent(
+                    query
+                )
             ),
 
         target_scale=
@@ -264,6 +270,45 @@ def _extract_explicit_scale(
 
 
     return None
+
+
+
+# ============================================================
+# Explanation-intent guard
+# ============================================================
+
+
+def _is_support_explanation_query(
+    query: str,
+) -> bool:
+    """
+    Detect questions asking why a scientific hypothesis is
+    supported or not supported.
+
+    These are explanation requests, not visibility,
+    preference, or robustness ranking requests.
+    """
+
+    q = query.lower().strip()
+
+    explanation_cue = (
+        "why" in q
+        or "explain" in q
+        or "reason" in q
+    )
+
+    support_cue = re.search(
+        r"\b("
+        r"support|supported|unsupported"
+        r")\b",
+        q,
+    )
+
+    return bool(
+        explanation_cue
+        and
+        support_cue
+    )
 
 
 
@@ -574,10 +619,19 @@ def interpret_query(
 
 
 
+        final_intent = (
+            "general"
+            if _is_support_explanation_query(
+                query
+            )
+            else parsed.intent
+        )
+
+
         return QueryInterpretation(
 
             intent=
-                parsed.intent,
+                final_intent,
 
 
             target_scale=
