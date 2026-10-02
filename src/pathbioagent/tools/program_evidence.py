@@ -387,6 +387,33 @@ def infer_ranking_intent(
         return "robustness"
 
     # --------------------------------------------------------
+    # Gene-level explanation
+    # --------------------------------------------------------
+    #
+    # Example:
+    #   Why is SFTPA1 highly visible?
+    #
+    # This must be checked before visibility ranking.
+    #
+
+    explanation_terms = (
+        "why is",
+        "why are",
+        "why does",
+        "explain",
+        "explanation",
+        "reason for",
+    )
+
+    if any(
+        term in text
+        for term in explanation_terms
+    ):
+        return "gene_explanation"
+
+
+
+    # --------------------------------------------------------
     # Visibility / absolute strength
     # --------------------------------------------------------
 

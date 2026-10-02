@@ -12,7 +12,44 @@ from pathbioagent.nodes import (
     test_candidate,
     evidence_gate,
     build_report,
+    discovery_evidence_node,
+    gene_explanation_node,
 )
+
+
+
+
+def route_after_interpret_query(
+    state: BiomarkerAgentState,
+) -> Literal[
+    "discovery_evidence",
+    "gene_explanation",
+    "parse_query",
+]:
+    """
+    Route discovery queries directly to
+    molecular visibility discovery analysis.
+    """
+
+    structured = state.get(
+        "structured_query",
+        {},
+    )
+
+    intent = structured.get(
+        "intent"
+    )
+
+
+    if intent == "discovery":
+        return "discovery_evidence"
+
+
+    if intent == "gene_explanation":
+        return "gene_explanation"
+
+
+    return "parse_query"
 
 
 def route_after_evidence_gate(
@@ -116,15 +153,46 @@ def build_graph():
         build_report,
     )
 
+    builder.add_node(
+        "discovery_evidence",
+        discovery_evidence_node,
+    )
+
+    builder.add_node(
+        "gene_explanation",
+        gene_explanation_node,
+    )
+
     # Main path
     builder.add_edge(
         START,
         "interpret_query",
     )
 
-    builder.add_edge(
+    builder.add_conditional_edges(
         "interpret_query",
-        "parse_query",
+        route_after_interpret_query,
+        {
+            "discovery_evidence":
+                "discovery_evidence",
+
+            "gene_explanation":
+                "gene_explanation",
+
+            "parse_query":
+                "parse_query",
+        },
+    )
+
+    builder.add_edge(
+        "discovery_evidence",
+        "build_report",
+    )
+
+    
+    builder.add_edge(
+        "gene_explanation",
+        "build_report",
     )
 
     builder.add_edge(

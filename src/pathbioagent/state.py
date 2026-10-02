@@ -19,6 +19,8 @@ class BiomarkerAgentState(TypedDict, total=False):
 
     structured_query: Dict[str, Any]
 
+    ranking_intent: Optional[str]
+
     task_type: str
 
 
@@ -38,6 +40,25 @@ class BiomarkerAgentState(TypedDict, total=False):
     # ========================================================
 
     evidence: Dict[str, Any]
+
+    # ========================================================
+    # Molecular visibility discovery evidence
+    # ========================================================
+
+    discovery_evidence: Dict[str, Any]
+
+
+    # ========================================================
+    # Gene-level explanation evidence
+    # ========================================================
+
+    gene_explanation: Dict[str, Any]
+
+    # ========================================================
+    # Gene-level scientific reasoning
+    # ========================================================
+
+    gene_reasoning: str
 
 
     # ========================================================
@@ -59,6 +80,8 @@ class BiomarkerAgentState(TypedDict, total=False):
     # ========================================================
     # Audit trace
     # ========================================================
+
+    discovery_evidence: dict
 
     trace: List[str]
 

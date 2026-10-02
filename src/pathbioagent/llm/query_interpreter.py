@@ -76,9 +76,11 @@ Return:
 {
  "intent":
     "preference" |
-    "visibility" |
-    "robustness" |
-    "general",
+"visibility" |
+"robustness" |
+"discovery" |
+"general"O
+
 
  "target_scale":
     "2p5x" |
@@ -274,6 +276,52 @@ def _extract_explicit_scale(
 
 
 # ============================================================
+
+
+def _is_gene_explanation_query(
+    query: str,
+) -> bool:
+    """
+    Detect single-gene molecular visibility
+    explanation questions.
+
+    Examples:
+        Why is SFTPA1 highly visible?
+        Explain ROS1 visibility.
+    """
+
+    q = query.lower()
+
+
+    explanation_terms = (
+        "why is",
+        "why are",
+        "why does",
+        "explain",
+        "reason for",
+    )
+
+
+    visibility_terms = (
+        "visible",
+        "visibility",
+        "molecular visibility",
+    )
+
+
+    return (
+        any(
+            term in q
+            for term in explanation_terms
+        )
+        and
+        any(
+            term in q
+            for term in visibility_terms
+        )
+    )
+
+
 # Explanation-intent guard
 # ============================================================
 
@@ -310,6 +358,36 @@ def _is_support_explanation_query(
         support_cue
     )
 
+
+
+
+
+def _is_discovery_query(
+    query: str,
+) -> bool:
+    """
+    Detect discovery queries asking for
+    factors explaining morphology-derived
+    molecular visibility.
+    """
+
+    q = query.lower()
+
+    terms = (
+        "what determines",
+        "what explains",
+        "which factors",
+        "gene properties",
+        "molecular visibility factors",
+        "patterns across genes",
+        "predict molecular visibility",
+        "morphology-derived molecular visibility",
+    )
+
+    return any(
+        term in q
+        for term in terms
+    )
 
 
 # ============================================================
@@ -619,13 +697,26 @@ def interpret_query(
 
 
 
-        final_intent = (
-            "general"
-            if _is_support_explanation_query(
-                query
-            )
-            else parsed.intent
-        )
+        if _is_discovery_query(
+            query
+        ):
+            final_intent = "discovery"
+
+        elif _is_gene_explanation_query(
+            query
+        ):
+            final_intent = "gene_explanation"
+
+
+        elif _is_support_explanation_query(
+            query
+        ):
+
+            final_intent = "general"
+
+        else:
+
+            final_intent = parsed.intent
 
 
         return QueryInterpretation(
@@ -662,46 +753,6 @@ def interpret_query(
 
 
     except Exception as e:
-
-
-        print(
-            "\n========== QUERY INTERPRETER DEBUG =========="
-        )
-
-
-        print(
-            "Exception type:",
-            type(e)
-        )
-
-
-        print(
-            "Exception:",
-            repr(e)
-        )
-
-
-        print(
-            "Provider:",
-            _provider()
-        )
-
-
-        print(
-            "Model:",
-            _model_name()
-        )
-
-
-        print(
-            "Query:",
-            query
-        )
-
-
-        print(
-            "==============================================\n"
-        )
 
 
         if not allow_fallback:

@@ -6,6 +6,21 @@ from pathbioagent.state import BiomarkerAgentState
 
 
 
+
+from pathbioagent.tools.gene_reasoning import (
+    build_gene_reasoning,
+)
+
+from pathbioagent.tools.gene_explanation import (
+    explain_gene,
+)
+
+from pathbioagent.tools.discovery_evidence import (
+    build_discovery_evidence,
+)
+
+
+
 from pathbioagent.llm import (
 
     interpret_query,
@@ -246,6 +261,103 @@ def _resolve_query_context(
 
 
 
+
+def discovery_evidence_node(
+    state: BiomarkerAgentState,
+) -> Dict[str, Any]:
+    """
+    Build discovery evidence for
+    morphology-derived molecular visibility.
+    """
+
+    (
+        target_scale,
+        ranking_intent,
+        entity,
+    ) = _resolve_query_context(
+        state
+    )
+
+
+    if ranking_intent != "discovery":
+
+        return {}
+
+
+    evidence = build_discovery_evidence()
+
+
+    return {
+        "discovery_evidence": evidence,
+    }
+
+
+
+
+
+def gene_explanation_node(
+    state: BiomarkerAgentState,
+) -> Dict[str, Any]:
+    """
+    Explain a single gene's morphology-derived
+    molecular visibility.
+    """
+
+    import re
+
+    query = state.get(
+        "query",
+        "",
+    )
+
+    genes = re.findall(
+        r"\b[A-Z][A-Z0-9-]{2,9}\b",
+        query,
+    )
+
+
+    stopwords = {
+        "WHY",
+        "THE",
+        "IS",
+        "ARE",
+        "HIGHLY",
+        "VISIBLE",
+        "EXPLAIN",
+        "GENE",
+    }
+
+
+    genes = [
+        g
+        for g in genes
+        if g not in stopwords
+    ]
+
+
+    if not genes:
+        return {}
+
+
+    evidence = explain_gene(
+        genes[0]
+    )
+
+
+    reasoning = build_gene_reasoning(
+        evidence
+    )
+
+
+    return {
+        "gene_explanation":
+            evidence,
+
+        "gene_reasoning":
+            reasoning,
+    }
+
+
 def interpret_query_node(
 
     state: BiomarkerAgentState,
@@ -391,6 +503,14 @@ def interpret_query_node(
         "structured_query":
 
             structured_query,
+
+
+
+        "ranking_intent":
+
+            structured_query.get(
+                "intent"
+            ),
 
 
 
@@ -2066,6 +2186,11 @@ def build_report(
         {},
     )
 
+    discovery_evidence = state.get(
+        "discovery_evidence",
+        None,
+    )
+
     tested_candidates = state.get(
         "tested_candidates",
         [],
@@ -2235,6 +2360,20 @@ def build_report(
         # Query metadata
         # ----------------------------------------------------
         "query": query,
+
+        "discovery_evidence":
+            discovery_evidence,
+
+        "gene_explanation":
+            state.get(
+                "gene_explanation"
+            ),
+
+        "gene_reasoning":
+            state.get(
+                "gene_reasoning"
+            ),
+
         "task_type": state.get("task_type"),
         "ranking_intent": ranking_intent,
         "target_scale": target_scale,

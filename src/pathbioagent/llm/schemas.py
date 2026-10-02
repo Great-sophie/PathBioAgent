@@ -11,6 +11,7 @@ QueryIntent = Literal[
     "visibility",
     "robustness",
     "discovery",
+    "gene_explanation",
     "general",
 ]
 

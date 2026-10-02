@@ -127,7 +127,7 @@ def _find_entity_card(report):
 
     return None
 
-def summarize_report(report):
+def format_agent_answer(report):
 
     print()
 
@@ -143,6 +143,99 @@ def summarize_report(report):
     answer_type = report.get(
         "primary_answer_type"
     )
+
+
+    # --------------------------------------------------------
+    # Discovery evidence
+    # --------------------------------------------------------
+
+    if report.get(
+        "discovery_evidence"
+    ):
+
+        discovery = report.get(
+            "discovery_evidence"
+        )
+
+        print(
+            "Molecular visibility discovery:"
+        )
+
+        print()
+
+        print(
+            "Target:",
+            discovery.get(
+                "target"
+            )
+        )
+
+        print()
+
+        print(
+            "Cross-validation:"
+        )
+
+        for item in discovery.get(
+            "model_performance",
+            []
+        ):
+
+            print(
+                f"- {item.get('model')}: "
+                f"R2={item.get('mean_r2'):.3f}, "
+                f"Spearman={item.get('mean_spearman')}"
+            )
+
+
+        print()
+
+        print(
+            "Top feature associations:"
+        )
+
+        for item in discovery.get(
+            "top_univariate_associations",
+            []
+        )[:5]:
+
+            print(
+                f"- {item.get('feature')}: "
+                f"rho={item.get('spearman_rho'):.3f}"
+            )
+
+
+        print()
+
+        print(
+            "Top Elastic Net features:"
+        )
+
+        for item in discovery.get(
+            "elastic_net_features",
+            []
+        )[:5]:
+
+            print(
+                f"- {item.get('feature')}: "
+                f"importance={item.get('importance'):.4f}"
+            )
+
+
+        print()
+
+        print(
+            "Scope:"
+        )
+
+        print(
+            discovery.get(
+                "scientific_scope"
+            )
+        )
+
+        return
+
 
 
     # --------------------------------------------------------
@@ -299,6 +392,16 @@ def summarize_report(report):
 
 def show_evidence(report):
 
+    # Gene-level reasoning and discovery queries already
+    # provide their own evidence-grounded answer.
+    # Do not append legacy program evidence summaries.
+    if (
+        report.get("gene_reasoning")
+        or
+        report.get("discovery_evidence")
+    ):
+        return
+
     print()
 
     print(
@@ -403,6 +506,98 @@ def run_query(
 # ============================================================
 # Main loop
 # ============================================================
+
+
+
+def format_agent_answer(
+    final_report
+):
+    """
+    Format scientific answers according
+    to agent reasoning type.
+    """
+
+    # -----------------------------
+    # Gene explanation
+    # -----------------------------
+
+    if final_report.get(
+        "gene_reasoning"
+    ):
+
+        return (
+            "Scientific explanation:\n\n"
+            +
+            final_report[
+                "gene_reasoning"
+            ]
+        )
+
+
+    # -----------------------------
+    # Discovery
+    # -----------------------------
+
+    if final_report.get(
+        "discovery_evidence"
+    ):
+
+        evidence = (
+            final_report[
+                "discovery_evidence"
+            ]
+        )
+
+        lines = [
+            "Molecular visibility discovery:",
+            "",
+            f"Target: {evidence.get('target')}",
+            "",
+            "Top associated features:",
+        ]
+
+
+        for item in evidence.get(
+            "top_univariate_associations",
+            []
+        )[:5]:
+
+            lines.append(
+                "- "
+                +
+                f"{item['feature']}: "
+                +
+                f"rho={item['spearman_rho']:.3f}"
+            )
+
+
+        return "\n".join(lines)
+
+
+    # -----------------------------
+    # Default report
+    # -----------------------------
+
+    return str(
+        final_report
+    )
+
+
+
+
+def summarize_report(report):
+    """
+    Compatibility wrapper for the interactive chat runner.
+    New scientific answer formatting is handled by
+    format_agent_answer().
+    """
+
+    print(
+        format_agent_answer(
+            report
+        )
+    )
+
 
 
 def main():
