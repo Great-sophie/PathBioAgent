@@ -2312,6 +2312,10 @@ def build_report(
         )
     )
 
+    # Expose agent execution provenance for chat interface/tests.
+    # Scientific evidence fields remain unchanged.
+    final_report["trace"] = list(trace)
+
     trace.append(
         "Built final report -> "
         f"tested={len(tested_candidates)}/"
