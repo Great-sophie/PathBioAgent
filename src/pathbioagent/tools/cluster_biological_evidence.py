@@ -858,6 +858,85 @@ def compare_clusters(
     return comparison
 
 
+def build_evidence_confidence(
+    evidence: Dict,
+) -> Dict:
+    """
+    Summarize confidence of biological evidence.
+    """
+
+    supporting = []
+
+    limitations = [
+        "Exploratory association",
+        "Same primary cohort analysis",
+        "Does not establish biological causality",
+    ]
+
+
+    if evidence.get(
+        "visibility_pattern"
+    ):
+
+        supporting.append(
+            "Cross-scale visibility phenotype"
+        )
+
+
+    programs = evidence.get(
+        "biological_programs",
+        {}
+    )
+
+
+    if (
+        programs.get("hallmark")
+        or
+        programs.get("go_reactome")
+    ):
+
+        supporting.append(
+            "Pathway enrichment evidence"
+        )
+
+
+    if evidence.get(
+        "rna"
+    ):
+
+        supporting.append(
+            "RNA characterization"
+        )
+
+
+    if len(supporting) >= 3:
+
+        level = "moderate"
+
+    elif len(supporting) == 2:
+
+        level = "limited"
+
+    else:
+
+        level = "weak"
+
+
+    return {
+
+        "level":
+            level,
+
+        "supporting_evidence":
+            supporting,
+
+        "limitations":
+            limitations,
+    }
+
+
+
+
 # ============================================================
 # Compact evidence payload for Agent
 # ============================================================
@@ -878,6 +957,11 @@ def build_cluster_biological_evidence_response(
     return {
         "evidence_type":
             "cluster_biological_evidence",
+
+        "confidence":
+            build_evidence_confidence(
+                evidence
+            ),
 
         "fine_cluster":
             evidence.get(
