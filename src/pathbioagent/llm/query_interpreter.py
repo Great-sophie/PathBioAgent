@@ -1,19 +1,21 @@
 """
 PathBioAgent LLM query interpreter.
 
-Supports:
-    - OpenAI structured output
-    - DeepSeek JSON output
-    - deterministic fallback
+Natural language query
+        ↓
+structured intent
 
-LLM responsibility:
-    Natural language -> structured intent
+Responsible for:
+    - intent detection
+    - target scale extraction
+    - entity extraction
 
-NOT responsible:
-    ranking
-    evidence evaluation
-    biological conclusions
+Not responsible for:
+    - ranking
+    - evidence evaluation
+    - biological interpretation
 """
+
 
 from __future__ import annotations
 
@@ -22,10 +24,9 @@ import json
 import os
 import re
 
-from typing import Any, Optional
-
 
 from dotenv import load_dotenv
+
 
 from langchain_openai import ChatOpenAI
 
@@ -44,16 +45,19 @@ from pathbioagent.tools.program_evidence import (
 
 
 # ============================================================
-# Defaults
+# Constants
 # ============================================================
+
 
 DEFAULT_OPENAI_MODEL = (
     "gpt-5.6-luna"
 )
 
+
 DEFAULT_DEEPSEEK_MODEL = (
     "deepseek-flash"
 )
+
 
 DEFAULT_DEEPSEEK_URL = (
     "https://api.deepseek.com"
@@ -61,21 +65,13 @@ DEFAULT_DEEPSEEK_URL = (
 
 
 
-# ============================================================
-# Prompt
-# ============================================================
-
 SYSTEM_PROMPT = """
 
-You are the query interpretation component of PathBioAgent.
+You are a query interpretation component.
 
-Only convert user questions into structured fields.
+Convert the user question into structured fields.
 
-Do NOT answer questions.
-Do NOT rank programs.
-Do NOT interpret biological meaning.
-
-Return JSON:
+Return:
 
 {
  "intent":
@@ -97,29 +93,8 @@ Return JSON:
     float
 }
 
-
-Examples:
-
-Question:
-Which programs prefer 10x?
-
-Output:
-{
-"intent":"preference",
-"target_scale":"10x",
-"entity":"molecular_program"
-}
-
-
-Question:
-Which programs have the most robust 10x preference?
-
-Output:
-{
-"intent":"robustness",
-"target_scale":"10x",
-"entity":"molecular_program"
-}
+Do not answer the question.
+Do not rank candidates.
 
 """
 
@@ -132,7 +107,6 @@ Output:
 
 def _load_environment():
 
-    # keep zero argument for tests
     load_dotenv()
 
 
@@ -152,8 +126,8 @@ def _model_name():
         "PATHBIO_LLM_MODEL"
     )
 
-
     if configured:
+
         return configured
 
 
@@ -196,7 +170,7 @@ def _base_url():
 
 
 # ============================================================
-# deterministic parser
+# deterministic fallback
 # ============================================================
 
 
@@ -228,12 +202,13 @@ def _deterministic_fallback(
         model_name=None,
 
         explicit_scale_guard_applied=False,
+
     )
 
 
 
 def deterministic_interpret_query(
-    query:str,
+    query: str,
 ):
 
     if not query.strip():
@@ -242,6 +217,7 @@ def deterministic_interpret_query(
             "query cannot be empty"
         )
 
+
     return _deterministic_fallback(
         query
     )
@@ -249,15 +225,15 @@ def deterministic_interpret_query(
 
 
 # ============================================================
-# scale guard
+# Explicit scale extraction
 # ============================================================
 
 
 def _extract_explicit_scale(
-    query:str
+    query: str,
 ):
 
-    q=query.lower()
+    q = query.lower()
 
 
     if re.search(
@@ -268,12 +244,14 @@ def _extract_explicit_scale(
         return "2p5x"
 
 
+
     if re.search(
         r"10\s*[x×]",
         q
     ):
 
         return "10x"
+
 
 
     if re.search(
@@ -284,12 +262,13 @@ def _extract_explicit_scale(
         return "40x"
 
 
+
     return None
 
 
 
 # ============================================================
-# LLM builders
+# LLM builder
 # ============================================================
 
 
@@ -297,7 +276,8 @@ def _build_structured_llm(
     model_name
 ):
 
-    key=_api_key()
+    key = _api_key()
+
 
     if not key:
 
@@ -306,7 +286,7 @@ def _build_structured_llm(
         )
 
 
-    kwargs={
+    kwargs = {
 
         "model":
             model_name,
@@ -316,6 +296,7 @@ def _build_structured_llm(
 
         "temperature":
             0,
+
     }
 
 
@@ -323,21 +304,16 @@ def _build_structured_llm(
 
         kwargs[
             "base_url"
-        ]=_base_url()
+        ] = _base_url()
 
 
 
-    llm=ChatOpenAI(
+    llm = ChatOpenAI(
         **kwargs
     )
 
 
-    #
-    # DeepSeek does not support
-    # OpenAI json_schema response format
-    #
-
-    if _provider()=="deepseek":
+    if _provider() == "deepseek":
 
         return llm.bind(
             response_format={
@@ -353,19 +329,8 @@ def _build_structured_llm(
 
 
 
-
-def _build_llm(
-    model_name=None
-):
-
-    return _build_structured_llm(
-        model_name or _model_name()
-    )
-
-
-
 # ============================================================
-# Parse LLM response
+# Parser
 # ============================================================
 
 
@@ -373,35 +338,21 @@ def _parse_deepseek_response(
     response
 ):
 
-    if hasattr(
-        response,
-        "content"
-    ):
-
-        content=response.content
-
-    else:
-
-        content=response
+    content = response.content
 
 
     if isinstance(
         content,
-        str
+        str,
     ):
 
-        data=json.loads(
+        content = json.loads(
             content
         )
 
-    else:
-
-        data=content
-
-
 
     return LLMStructuredQuery(
-        **data
+        **content
     )
 
 
@@ -409,18 +360,29 @@ def _parse_deepseek_response(
 def _parse_openai_response(
     response
 ):
+    """
+    Parse OpenAI structured response.
+
+    Supports:
+        - LLMStructuredQuery
+        - pydantic object
+        - dict
+        - fake response used in tests
+    """
+
 
     if isinstance(
         response,
-        LLMStructuredQuery
+        LLMStructuredQuery,
     ):
 
         return response
 
 
+
     if hasattr(
         response,
-        "model_dump"
+        "model_dump",
     ):
 
         return LLMStructuredQuery(
@@ -428,8 +390,43 @@ def _parse_openai_response(
         )
 
 
-    return LLMStructuredQuery(
-        **response
+
+    if isinstance(
+        response,
+        dict,
+    ):
+
+        return LLMStructuredQuery(
+            **response
+        )
+
+
+
+    if hasattr(
+        response,
+        "content",
+    ):
+
+        content = response.content
+
+
+        if isinstance(
+            content,
+            str,
+        ):
+
+            content = json.loads(
+                content
+            )
+
+
+        return LLMStructuredQuery(
+            **content
+        )
+
+
+    raise TypeError(
+        f"Unsupported response type: {type(response)}"
     )
 
 
@@ -440,7 +437,7 @@ def _parse_openai_response(
 
 
 def interpret_query(
-    query:str,
+    query: str,
     *,
     allow_fallback=True,
 ):
@@ -457,14 +454,22 @@ def interpret_query(
 
 
 
+    explicit_scale = (
+        _extract_explicit_scale(
+            query
+        )
+    )
+
+
     try:
 
-        llm=_build_structured_llm(
+
+        llm = _build_structured_llm(
             _model_name()
         )
 
 
-        messages=[
+        messages = [
 
             {
                 "role":
@@ -481,49 +486,82 @@ def interpret_query(
 
                 "content":
                     query,
-            }
+            },
 
         ]
 
 
-        response=llm.invoke(
+        response = llm.invoke(
             messages
         )
 
 
+        # --------------------------------------------------------
+        # Structured output compatibility
+        # --------------------------------------------------------
+        # LangChain structured output and unit tests may directly
+        # return LLMStructuredQuery objects.
+        # These should bypass provider-specific parsers.
+        # --------------------------------------------------------
 
-        if _provider()=="deepseek":
+        # --------------------------------------------------------
+        # Structured output compatibility
+        # --------------------------------------------------------
+        # Accept structured query objects directly.
+        # This supports LangChain structured output,
+        # DeepSeek structured models, and unit-test mocks.
+        # --------------------------------------------------------
 
-            parsed=(
-                _parse_deepseek_response(
-                    response
-                )
-            )
+        if (
+            hasattr(response, "intent")
+            and
+            hasattr(response, "target_scale")
+            and
+            hasattr(response, "entity")
+        ):
+
+            parsed = response
 
 
         else:
 
-            parsed=(
-                _parse_openai_response(
-                    response
+            provider = _provider()
+
+
+            if provider == "deepseek":
+
+                parsed = (
+                    _parse_deepseek_response(
+                        response
+                    )
                 )
-            )
+
+            else:
+
+                parsed = (
+                    _parse_openai_response(
+                        response
+                    )
+                )
 
 
-
-        explicit_scale=(
-            _extract_explicit_scale(
-                query
-            )
-        )
-
-
-        final_scale=(
+        final_scale = (
 
             explicit_scale
             if explicit_scale
             else
             parsed.target_scale
+
+        )
+
+
+
+        guard = (
+
+            explicit_scale is not None
+            and
+            explicit_scale != parsed.target_scale
+
         )
 
 
@@ -533,38 +571,81 @@ def interpret_query(
             intent=
                 parsed.intent,
 
+
             target_scale=
                 final_scale,
+
 
             entity=
                 parsed.entity,
 
+
             confidence=
                 parsed.confidence,
+
 
             parser_source=
                 "llm",
 
+
             model_name=
                 _model_name(),
 
+
             explicit_scale_guard_applied=
-                (
-                    explicit_scale is not None
-                    and
-                    explicit_scale !=
-                    parsed.target_scale
-                ),
+                guard,
+
         )
 
 
 
-    except Exception:
+    except Exception as e:
+
+
+        print(
+            "\n========== QUERY INTERPRETER DEBUG =========="
+        )
+
+
+        print(
+            "Exception type:",
+            type(e)
+        )
+
+
+        print(
+            "Exception:",
+            repr(e)
+        )
+
+
+        print(
+            "Provider:",
+            _provider()
+        )
+
+
+        print(
+            "Model:",
+            _model_name()
+        )
+
+
+        print(
+            "Query:",
+            query
+        )
+
+
+        print(
+            "==============================================\n"
+        )
 
 
         if not allow_fallback:
 
             raise
+
 
 
         return deterministic_interpret_query(
