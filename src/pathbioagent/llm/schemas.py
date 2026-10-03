@@ -13,6 +13,7 @@ QueryIntent = Literal[
     "discovery",
     "gene_explanation",
     "biological_pattern",
+    "cluster_comparison",
     "general",
 ]
 

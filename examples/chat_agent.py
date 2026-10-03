@@ -647,10 +647,181 @@ def format_agent_answer(
             )
 
 
+        # --------------------------------------------------------
+        # Evidence confidence
+        # --------------------------------------------------------
+
+        confidence = biological.get(
+            "confidence"
+        )
+
+
+        if confidence:
+
+            lines.append(
+                ""
+            )
+
+            lines.append(
+                "Evidence confidence:"
+            )
+
+            lines.append(
+                "- Level: "
+                +
+                str(
+                    confidence.get(
+                        "level"
+                    )
+                )
+            )
+
+
+            supporting = confidence.get(
+                "supporting_evidence",
+                []
+            )
+
+
+            if supporting:
+
+                lines.append(
+                    ""
+                )
+
+                lines.append(
+                    "Supporting evidence:"
+                )
+
+                for item in supporting:
+
+                    lines.append(
+                        "- "
+                        +
+                        str(item)
+                    )
+
+
+            limitations = confidence.get(
+                "limitations",
+                []
+            )
+
+
+            if limitations:
+
+                lines.append(
+                    ""
+                )
+
+                lines.append(
+                    "Limitations:"
+                )
+
+                for item in limitations:
+
+                    lines.append(
+                        "- "
+                        +
+                        str(item)
+                    )
+
+
         return "\n".join(lines)
 
 
     # -----------------------------
+    # --------------------------------------------------------
+    # Biological pattern evidence confidence
+    # --------------------------------------------------------
+
+    biological = report.get(
+        "biological_pattern_evidence"
+    )
+
+
+    if biological:
+
+        confidence = biological.get(
+            "confidence"
+        )
+
+
+        if confidence:
+
+            lines.append(
+                ""
+            )
+
+            lines.append(
+                "Evidence confidence:"
+            )
+
+
+            lines.append(
+                "- Level: "
+                +
+                str(
+                    confidence.get(
+                        "level"
+                    )
+                )
+            )
+
+
+            supporting = confidence.get(
+                "supporting_evidence",
+                []
+            )
+
+
+            if supporting:
+
+                lines.append(
+                    ""
+                )
+
+                lines.append(
+                    "Supporting evidence:"
+                )
+
+
+                for item in supporting:
+
+                    lines.append(
+                        "- "
+                        +
+                        str(item)
+                    )
+
+
+            limitations = confidence.get(
+                "limitations",
+                []
+            )
+
+
+            if limitations:
+
+                lines.append(
+                    ""
+                )
+
+                lines.append(
+                    "Limitations:"
+                )
+
+
+                for item in limitations:
+
+                    lines.append(
+                        "- "
+                        +
+                        str(item)
+                    )
+
+
+
     # Default report
     # -----------------------------
 

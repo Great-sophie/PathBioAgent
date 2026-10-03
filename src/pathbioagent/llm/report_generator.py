@@ -78,7 +78,7 @@ def _get_chat_model():
     """
 
 
-    load_dotenv()
+    load_dotenv(override=True)
 
 
     provider = os.getenv(
